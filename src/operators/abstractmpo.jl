@@ -107,6 +107,8 @@ function Base.:*(mpo::AbstractMPO, mps::AbstractMPS)
     return *(GeometryStyle(mpo) & GeometryStyle(mps), OperatorStyle(mpo), mpo, mps)
 end
 
+Base.isapprox(mpo1::AbstractMPO, mpo2::AbstractMPO; kwargs...) = isapprox(GeometryStyle(mpo1) & GeometryStyle(mpo2), OperatorStyle(mpo1) & OperatorStyle(mpo2), mpo1, mpo2; kwargs...)
+
 LinearAlgebra.tr(mpo::AbstractMPO; kwargs...) = tr(GeometryStyle(mpo), OperatorStyle(mpo), mpo; kwargs...)
 
 function TensorKit.dot(bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS; kwargs...)

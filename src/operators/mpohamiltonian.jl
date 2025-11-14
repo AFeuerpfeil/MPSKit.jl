@@ -679,9 +679,9 @@ end
 
 # Linear Algebra
 # --------------
-function Base.:+(
-        H₁::FiniteMPOHamiltonian{O}, H₂::FiniteMPOHamiltonian{O}
-    ) where {O <: JordanMPOTensor}
+function Base.:+(::FiniteStyle, ::HamiltonianStyle,
+        H₁::O, H₂::O
+    )::O where {O <: AbstractMPO}
     N = check_length(H₁, H₂)
     H = similar(parent(H₁))
     Vtriv = oneunit(spacetype(H₁))
@@ -700,12 +700,12 @@ function Base.:+(
 
         H[i] = eltype(H)(V, A, B, C, D)
     end
-    return FiniteMPOHamiltonian(H)
+    return O(H)
 end
-function Base.:+(
-        H₁::InfiniteMPOHamiltonian{O},
-        H₂::InfiniteMPOHamiltonian{O}
-    ) where {O <: JordanMPOTensor}
+function Base.:+(::InfiniteStyle, ::HamiltonianStyle,
+        H₁::O,
+        H₂::O
+    )::O where {O <: AbstractMPO}
     N = check_length(H₁, H₂)
     H = similar(parent(H₁))
     Vtriv = oneunit(spacetype(H₁))
@@ -721,7 +721,7 @@ function Base.:+(
 
         H[i] = eltype(H)(V, A, B, C, D)
     end
-    return InfiniteMPOHamiltonian(H)
+    return O(H)
 end
 
 function Base.:+(H::FiniteMPOHamiltonian, λs::AbstractVector{<:Number})
@@ -750,7 +750,6 @@ end
 
 Base.:-(H::MPOHamiltonian, λs::AbstractVector{<:Number}) = H + (-λs)
 Base.:-(λs::AbstractVector{<:Number}, H::MPOHamiltonian) = λs + (-H)
-Base.:-(H1::MPOHamiltonian, H2::MPOHamiltonian) = H1 + (-H2)
 
 function VectorInterface.scale!(
         H::MPOHamiltonian{O}, λ::Number
@@ -775,13 +774,16 @@ function VectorInterface.scale!(
     return Hdst
 end
 
-function Base.:*(H1::MPOHamiltonian, H2::MPOHamiltonian)
+function Base.:*(
+        ::FiniteStyle, ::HamiltonianStyle,
+        H1::O, H2::O
+    )::O where {O <: AbstractMPO}
     check_length(H1, H2)
     Ws = fuse_mul_mpo.(parent(H1), parent(H2))
-    return MPOHamiltonian(Ws)
+    return O(Ws)
 end
 
-function Base.:*(H::FiniteMPOHamiltonian, mps::FiniteMPS)
+function Base.:*(::FiniteStyle, ::HamiltonianStyle, H::AbstractMPO, mps::AbstractMPS)
     N = check_length(H, mps)
     @assert N > 2 "MPS should have at least three sites, to be implemented otherwise"
     A = convert.(BlockTensorMap, [mps.AC[1]; mps.AR[2:end]])
@@ -833,7 +835,10 @@ function Base.:*(H::FiniteMPOHamiltonian{<:MPOTensor}, x::AbstractTensorMap)
     return TensorMap(_apply_finitempo(x, L, M, R))
 end
 
-function TensorKit.dot(H₁::FiniteMPOHamiltonian, H₂::FiniteMPOHamiltonian)
+function TensorKit.dot(
+        ::FiniteStyle, ::HamiltonianStyle,
+        H₁::AbstractMPO, H₂::AbstractMPO
+    )
     N = check_length(H₁, H₂)
     Nhalf = N ÷ 2
     # left half
@@ -852,7 +857,8 @@ function TensorKit.dot(H₁::FiniteMPOHamiltonian, H₂::FiniteMPOHamiltonian)
 end
 
 function TensorKit.dot(
-        bra::FiniteMPS, H::FiniteMPOHamiltonian, ket::FiniteMPS = bra,
+        ::FiniteStyle, ::HamiltonianStyle,
+        bra::AbstractMPS, H::AbstractMPO, ket::AbstractMPS = bra,
         envs = environments(bra, H, ket)
     )
     @assert ket === bra "TBA"
@@ -868,7 +874,8 @@ function TensorKit.dot(
 end
 
 function Base.isapprox(
-        H₁::FiniteMPOHamiltonian, H₂::FiniteMPOHamiltonian;
+        ::FiniteStyle, ::HamiltonianStyle,
+        H₁::AbstractMPO, H₂::AbstractMPO;
         atol::Real = 0, rtol::Real = atol > 0 ? 0 : √eps(real(scalartype(H₁)))
     )
     check_length(H₁, H₂)
