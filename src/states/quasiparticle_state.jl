@@ -110,9 +110,10 @@ function Base.setindex!(v::RightGaugedQP, B, i::Int)
 end
 
 #conversion between gauges (partially implemented)
+Base.convert(T::Type{RightGaugedQP}, input::LeftGaugedQP) = convert(T, GeometryStyle(input), input)
 function Base.convert(
-        ::Type{RightGaugedQP}, input::LeftGaugedQP{S}
-    ) where {S <: InfiniteMPS}
+        ::Type{RightGaugedQP}, ::InfiniteStyle, input::LeftGaugedQP
+    )
     rg = RightGaugedQP(
         zero, input.left_gs, input.right_gs;
         sector = first(sectors(auxiliaryspace(input))), momentum = input.momentum
@@ -159,9 +160,10 @@ function Base.convert(
 
     return rg
 end
+Base.convert(T::Type{LeftGaugedQP}, input::RightGaugedQP) = convert(T, GeometryStyle(input), input)
 function Base.convert(
-        ::Type{LeftGaugedQP}, input::RightGaugedQP{S}
-    ) where {S <: InfiniteMPS}
+        ::Type{LeftGaugedQP}, ::InfiniteStyle, input::RightGaugedQP
+    )
     lg = LeftGaugedQP(
         zero, input.left_gs, input.right_gs;
         sector = first(sectors(auxiliaryspace(input))), momentum = input.momentum
@@ -303,7 +305,8 @@ Base.:*(a::Number, v::QP) = mul!(similar(v), a, v)
 
 Base.zero(v::QP) = v * 0;
 
-function Base.convert(::Type{<:FiniteMPS}, v::QP{S}) where {S <: FiniteMPS}
+Base.convert(T::Type{<:AbstractMPS}, v::QP{S}) where {S <: AbstractMPS} = convert(T, GeometryStyle(T) & GeometryStyle(v), v)
+function Base.convert(::Type{<:FiniteMPS}, FiniteStyle(), v::QP)
     #very slow and clunky, but shouldn't be performance critical anyway
 
     elt = scalartype(v)

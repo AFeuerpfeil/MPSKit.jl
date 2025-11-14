@@ -294,14 +294,14 @@ physicalspace(ψ::InfiniteMPS, n::Integer) = physicalspace(ψ.AL[n])
 #     return ProductSpace{S}(space.(Ref(t), Base.front(Base.tail(TensorKit.allind(t)))))
 # end
 
-TensorKit.norm(ψ::InfiniteMPS) = norm(ψ.AC[1])
-function TensorKit.normalize!(ψ::InfiniteMPS)
+TensorKit.norm(::InfiniteStyle, ψ::AbstractMPS) = norm(ψ.AC[1])
+function TensorKit.normalize!(::InfiniteStyle, ψ::AbstractMPS)
     normalize!.(ψ.C)
     normalize!.(ψ.AC)
     return ψ
 end
 
-function TensorKit.dot(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; krylovdim = 30)
+function TensorKit.dot(::InfiniteStyle, ψ₁::AbstractMPS, ψ₂::AbstractMPS; krylovdim = 30)
     init = similar(ψ₁.AL[1], _firstspace(ψ₂.AL[1]) ← _firstspace(ψ₁.AL[1]))
     randomize!(init)
     val, = fixedpoint(
@@ -309,72 +309,26 @@ function TensorKit.dot(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; krylovdim = 30)
     )
     return val
 end
-function Base.isapprox(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; kwargs...)
-    return isapprox(dot(ψ₁, ψ₂), 1; kwargs...)
-end
 
 #===========================================================================================
 Fixedpoints
 ===========================================================================================#
 
-"""
-    l_RR(ψ, location)
+l_RR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1) = adjoint(ψ.C[loc - 1]) * ψ.C[loc - 1]
+l_RL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1) = ψ.C[loc - 1]
+l_LR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1) = ψ.C[loc - 1]'
 
-Left dominant eigenvector of the `AR`-`AR` transfermatrix.
-"""
-l_RR(ψ::InfiniteMPS, loc::Int = 1) = adjoint(ψ.C[loc - 1]) * ψ.C[loc - 1]
-
-"""
-    l_RL(ψ, location)
-
-Left dominant eigenvector of the `AR`-`AL` transfermatrix.
-"""
-l_RL(ψ::InfiniteMPS, loc::Int = 1) = ψ.C[loc - 1]
-
-"""
-    l_LR(ψ, location)
-
-Left dominant eigenvector of the `AL`-`AR` transfermatrix.
-"""
-l_LR(ψ::InfiniteMPS, loc::Int = 1) = ψ.C[loc - 1]'
-
-"""
-    l_LL(ψ, location)
-
-Left dominant eigenvector of the `AL`-`AL` transfermatrix.
-"""
-function l_LL(ψ::InfiniteMPS{A}, loc::Int = 1) where {A}
-    return isomorphism(storagetype(A), left_virtualspace(ψ, loc), left_virtualspace(ψ, loc))
+function l_LL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1)
+    return isomorphism(storagetype(ψ.AL[1]), left_virtualspace(ψ, loc), left_virtualspace(ψ, loc))
 end
 
-"""
-    r_RR(ψ, location)
-
-Right dominant eigenvector of the `AR`-`AR` transfermatrix.
-"""
-function r_RR(ψ::InfiniteMPS{A}, loc::Int = length(ψ)) where {A}
+function r_RR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = length(ψ))
     return isomorphism(
-        storagetype(A), right_virtualspace(ψ, loc), right_virtualspace(ψ, loc)
+        storagetype(ψ), right_virtualspace(ψ, loc), right_virtualspace(ψ, loc)
     )
 end
 
-"""
-    r_RL(ψ, location)
 
-Right dominant eigenvector of the `AR`-`AL` transfermatrix.
-"""
-r_RL(ψ::InfiniteMPS, loc::Int = length(ψ)) = ψ.C[loc]'
-
-"""
-    r_LR(ψ, location)
-
-Right dominant eigenvector of the `AL`-`AR` transfermatrix.
-"""
-r_LR(ψ::InfiniteMPS, loc::Int = length(ψ)) = ψ.C[loc]
-
-"""
-    r_LL(ψ, location)
-
-Right dominant eigenvector of the `AL`-`AL` transfermatrix.
-"""
-r_LL(ψ::InfiniteMPS, loc::Int = length(ψ)) = ψ.C[loc] * adjoint(ψ.C[loc])
+r_RL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = length(ψ)) = ψ.C[loc]'
+r_LR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = length(ψ)) = ψ.C[loc]
+r_LL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = length(ψ)) = ψ.C[loc] * adjoint(ψ.C[loc])

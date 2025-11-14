@@ -91,7 +91,7 @@ TensorKit.sectortype(::Type{Multiline{T}}) where {T} = sectortype(T)
 TensorKit.spacetype(t::Multiline) = spacetype(typeof(t))
 TensorKit.spacetype(::Type{Multiline{T}}) where {T} = spacetype(T)
 
-function TensorKit.dot(a::MultilineMPS, b::MultilineMPS; kwargs...)
+function TensorKit.dot(::MultilineMPS, b::MultilineMPS; kwargs...)
     return sum(dot.(parent(a), parent(b); kwargs...))
 end
 TensorKit.normalize!(a::MultilineMPS) = (normalize!.(parent(a)); return a)

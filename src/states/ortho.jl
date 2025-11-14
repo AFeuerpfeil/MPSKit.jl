@@ -108,7 +108,9 @@ Bring an `InfiniteMPS` into a uniform gauge, using the specified algorithm.
 """
 gaugefix!
 
-function gaugefix!(ψ::InfiniteMPS, A, C₀ = ψ.C[end]; order = :LR, kwargs...)
+gaugefix!(ψ::AbstractMPS, args...; kwargs...) = gaugefix!(GeometryStyle(ψ), ψ, args...; kwargs...)
+
+function gaugefix!(::InfiniteStyle, ψ::AbstractMPS, A, C₀ = ψ.C[end]; order = :LR, kwargs...)
     alg = if order === :LR || order === :RL
         MixedCanonical(; order, kwargs...)
     elseif order === :L
@@ -123,7 +125,8 @@ function gaugefix!(ψ::InfiniteMPS, A, C₀ = ψ.C[end]; order = :LR, kwargs...)
 end
 
 # expert mode: actual implementation
-function gaugefix!(ψ::InfiniteMPS, A, C₀, alg::MixedCanonical)
+gaugefix!(ψ::AbstractMPS, A, C₀, alg::Algorithm) = gaugefix!(GeometryStyle(ψ), ψ, A, C₀, alg)
+function gaugefix!(::InfiniteStyle, ψ::InfiniteMPS, A, C₀, alg::MixedCanonical)
     if alg.order === :LR
         gaugefix!(ψ, A, C₀, alg.alg_leftcanonical)
         gaugefix!(ψ, ψ.AL, ψ.C[end], alg.alg_rightcanonical)
@@ -135,7 +138,7 @@ function gaugefix!(ψ::InfiniteMPS, A, C₀, alg::MixedCanonical)
     end
     return ψ
 end
-function gaugefix!(ψ::InfiniteMPS, A, C₀, alg::LeftCanonical)
+function gaugefix!(::InfiniteStyle, ψ::InfiniteMPS, A, C₀, alg::LeftCanonical)
     uniform_leftorth!((ψ.AL, ψ.C), A, C₀, alg)
     return ψ
 end
@@ -151,7 +154,7 @@ end
 Bring updated `AC` and `C` tensors back into a consistent set of left or right canonical
 tensors. This minimizes `∥AC_i - AL_i * C_i∥` or `∥AC_i - C_{i-1} * AR_i∥`.
 
-The `alg` is passed on to `left_orth!` and `right_orth!`, and can be used to control the kind of 
+The `alg` is passed on to `left_orth!` and `right_orth!`, and can be used to control the kind of
 factorization used. By default, this is set to a (positive) QR/LQ, even though the
 optimal algorithm would use a polar decompositions instead, sacrificing a bit of
 performance for accuracy.

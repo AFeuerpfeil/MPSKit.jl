@@ -20,7 +20,7 @@ Type that represents a finite Matrix Product State embedded in an infinte Matrix
               [right_gs::InfiniteMPS])
     WindowMPS([f, eltype], physicalspaces::Vector{<:Union{S,CompositeSpace{S}}},
               maxvirtualspace::S, left_gs::InfiniteMPS, [right_gs::InfiniteMPS])
-    
+
 Construct a WindowMPS via a specification of left and right infinite environment, and either
 a window state or a vector of tensors to construct the window. Alternatively, it is possible
 to supply the same arguments as for the constructor of [`FiniteMPS`](@ref), followed by a
@@ -152,8 +152,9 @@ for f in (:physicalspace, :left_virtualspace, :right_virtualspace)
         $f(ψ.window, n)
     @eval $f(ψ::WindowMPS) = WindowArray($f(ψ.left_gs), $f(ψ.window), $f(ψ.right_gs))
 end
-r_RR(ψ::WindowMPS) = r_RR(ψ.right_gs, length(ψ))
-l_LL(ψ::WindowMPS) = l_LL(ψ.left_gs, 1)
+
+r_RR(::WindowStyle, ψ::AbstractMPS, loc::Int) = r_RR(ψ.right_gs, loc)
+l_LL(::WindowStyle, ψ::AbstractMPS, loc::Int) = l_LL(ψ.left_gs, loc)
 
 function Base.getproperty(ψ::WindowMPS, prop::Symbol)
     if prop == :AL
@@ -188,7 +189,7 @@ function TensorKit.rmul!(ψ::WindowMPS, a::Number)
     return ψ
 end
 
-function TensorKit.dot(ψ₁::WindowMPS, ψ₂::WindowMPS)
+function TensorKit.dot(::WindowStyle, ψ₁::AbstractMPS, ψ₂::AbstractMPS)
     length(ψ₁) == length(ψ₂) || throw(ArgumentError("MPS with different length"))
     ψ₁.left_gs == ψ₂.left_gs ||
         dot(ψ₁.left_gs, ψ₂.left_gs) ≈ 1 ||
@@ -201,7 +202,5 @@ function TensorKit.dot(ψ₁::WindowMPS, ψ₂::WindowMPS)
     return tr(_transpose_front(ψ₁.AC[1])' * _transpose_front(ψ₂.AC[1]) * ρr)
 end
 
-TensorKit.norm(ψ::WindowMPS) = norm(ψ.window)
-
-TensorKit.normalize!(ψ::WindowMPS) = normalize!(ψ.window)
-TensorKit.normalize(ψ::WindowMPS) = normalize!(copy(ψ))
+TensorKit.norm(::WindowStyle, ψ::AbstractMPS) = norm(ψ.window)
+TensorKit.normalize!(::WindowStyle, ψ::AbstractMPS) = normalize!(ψ.window)
