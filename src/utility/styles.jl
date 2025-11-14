@@ -35,3 +35,6 @@ abstract type IsfiniteStyle end
 
 struct FiniteStyle <: IsfiniteStyle end
 struct InfiniteStyle <: IsfiniteStyle end
+
+Base.:&(::FiniteStyle, ::FiniteStyle) = FiniteStyle()
+Base.:&(::InfiniteStyle, ::InfiniteStyle) = InfiniteStyle()

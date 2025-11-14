@@ -16,9 +16,6 @@ struct FiniteEnvironments{A, B, C, D} <: AbstractMPSEnvironments
     GRs::Vector{D}
 end
 
-function environments(below, (operator, above)::Tuple, args...; kwargs...)
-    return environments(below, operator, above, args...; kwargs...)
-end
 function environments(below, operator, leftstart, rightstart)
     return environments(below, operator, nothing, leftstart, rightstart)
 end
