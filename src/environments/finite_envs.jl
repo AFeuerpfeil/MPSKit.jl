@@ -16,9 +16,6 @@ struct FiniteEnvironments{A, B, C, D} <: AbstractMPSEnvironments
     GRs::Vector{D}
 end
 
-function environments(below, (operator, above)::Tuple, args...; kwargs...)
-    return environments(below, operator, above, args...; kwargs...)
-end
 function environments(below, operator, leftstart, rightstart)
     return environments(below, operator, nothing, leftstart, rightstart)
 end
@@ -37,18 +34,18 @@ function environments(below, operator, above, leftstart, rightstart)
 end
 
 function environments(
-        below::FiniteMPS{S}, O::Union{FiniteMPO, FiniteMPOHamiltonian}, above = nothing
-    ) where {S}
+        ::FiniteStyle, ::OperatorStyle, below::AbstractMPS, O::AbstractMPO, above::AbstractMPS
+    )
     Vl_bot = left_virtualspace(below, 1)
     Vl_mid = left_virtualspace(O, 1)
-    Vl_top = isnothing(above) ? left_virtualspace(below, 1) : left_virtualspace(above, 1)
-    leftstart = isomorphism(storagetype(S), Vl_bot ⊗ Vl_mid' ← Vl_top)
+    Vl_top = left_virtualspace(above, 1)
+    leftstart = isomorphism(storagetype(below), Vl_bot ⊗ Vl_mid' ← Vl_top)
 
     N = length(below)
     Vr_bot = right_virtualspace(below, N)
     Vr_mid = right_virtualspace(O, N)
-    Vr_top = isnothing(above) ? right_virtualspace(below, N) : right_virtualspace(above, N)
-    rightstart = isomorphism(storagetype(S), Vr_top ⊗ Vr_mid ← Vr_bot)
+    Vr_top = right_virtualspace(above, N)
+    rightstart = isomorphism(storagetype(below), Vr_top ⊗ Vr_mid ← Vr_bot)
 
     return environments(below, O, above, leftstart, rightstart)
 end
