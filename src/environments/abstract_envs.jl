@@ -106,7 +106,11 @@ function environments(below, (operator, above)::Tuple, args...; kwargs...)
 end
 
 function environments(
-        below::AbstractMPS, O::AbstractMPO, above::AbstractMPS
-        below::FiniteMPS{S}, O::Union{FiniteMPO, FiniteMPOHamiltonian}, above = nothing
-    ) where {S}
+        below::AbstractMPS, O::AbstractMPO, above::AbstractMPS; kwargs...
+    )
+    isfinite_style = IsfiniteStyle(below) & IsfiniteStyle(O) & IsfiniteStyle(above)
+    operator_style = OperatorStyle(O)
+    return environments(
+        isfinite_style, operator_style, below, O, above; kwargs...
+    )
 end
