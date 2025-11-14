@@ -227,7 +227,7 @@ end
 Utility
 ===========================================================================================#
 
-function AC2(ψ::InfiniteMPS, i::Integer; kind = :ACAR)
+function AC2(::InfiniteStyle, ψ::AbstractMPS, i::Integer; kind = :ACAR)
     if kind == :ACAR
         return ψ.AC[i] * _transpose_tail(ψ.AR[i + 1])
     elseif kind == :ALAC
@@ -276,7 +276,7 @@ end
 
 Base.eachindex(ψ::InfiniteMPS) = eachindex(ψ.AL)
 Base.eachindex(l::IndexStyle, ψ::InfiniteMPS) = eachindex(l, ψ.AL)
-eachsite(ψ::InfiniteMPS) = PeriodicArray(eachindex(ψ))
+eachsite(::InfiniteStyle, ψ::AbstractMPS) = PeriodicArray(eachindex(ψ))
 
 Base.checkbounds(::Type{Bool}, ψ::InfiniteMPS, i::Integer) = true
 

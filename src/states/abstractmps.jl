@@ -164,6 +164,9 @@ If this hasn't been computed before, this can be computed as:
 - `kind=:ALAC` : AL[i] * AC[i+1]
 """ AC2
 
+
+AC2(psi::AbstractMPS, site::Int; kwargs...) = AC2(GeometryStyle(psi), psi, site; kwargs...)
+
 #===========================================================================================
 MPS types
 ===========================================================================================#
@@ -245,4 +248,22 @@ physicalspace(ψ::AbstractMPS) = map(Base.Fix1(physicalspace, ψ), eachsite(ψ))
 
 Return an iterator over the sites of the MPS `state`.
 """
-eachsite(ψ::AbstractMPS) = eachindex(ψ)
+eachsite(ψ::AbstractMPS) = eachsite(GeometryStyle(ψ), ψ)
+
+eachsite(::GeometryStyle, ψ::AbstractMPS) = eachindex(ψ)
+
+# Utility
+# -----------------
+
+function TensorKit.dot(ψ₁::AbstractMPS, ψ₂::AbstractMPS; kwargs...)
+    geometry_style = GeometryStyle(ψ₁) & GeometryStyle(ψ₂)
+    init = similar(ψ₁.AL[1], _firstspace(ψ₂.AL[1]) ← _firstspace(ψ₁.AL[1]))
+    randomize!(init)
+    val, = fixedpoint(
+        TransferMatrix(ψ₂.AL, ψ₁.AL), init, :LM, Arnoldi(; krylovdim = krylovdim)
+    )
+    return val
+end
+function Base.isapprox(ψ₁::InfiniteMPS, ψ₂::InfiniteMPS; kwargs...)
+    return isapprox(dot(ψ₁, ψ₂), 1; kwargs...)
+end
