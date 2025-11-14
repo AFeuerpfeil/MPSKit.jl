@@ -229,7 +229,7 @@ eachsite(state::QP) = eachsite(state.left_gs)
 istopological(qp::QP) = qp.left_gs !== qp.right_gs
 istrivial(qp::QP) = !istopological(qp) && isone(auxiliarysector(qp))
 
-IsfiniteStyle(qp::QP) = IsfiniteStyle(qp.left_gs)
+GeometryStyle(qp::QP) = GeometryStyle(qp.left_gs)
 
 Base.copy(a::QP) = copy!(similar(a), a)
 Base.copyto!(a::QP, b::QP) = copy!(a, b)

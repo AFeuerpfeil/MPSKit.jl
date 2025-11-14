@@ -69,7 +69,7 @@ end
 Determine an appropriate algorithm for computing the environments, based on the given `kwargs...`.
 """
 function environment_alg(below::AbstractMPS, operator::AbstractMPO, above::AbstractMPS; kwargs...)
-    isfinite_style = IsfiniteStyle(below) & IsfiniteStyle(operator) & IsfiniteStyle(above)
+    isfinite_style = GeometryStyle(below) & GeometryStyle(operator) & GeometryStyle(above)
     operator_style = OperatorStyle(operator)
     return environment_alg(isfinite_style, operator_style, below, operator, above; kwargs...)
 end
@@ -108,7 +108,7 @@ end
 function environments(
         below::AbstractMPS, O::AbstractMPO, above::AbstractMPS; kwargs...
     )
-    isfinite_style = IsfiniteStyle(below) & IsfiniteStyle(O) & IsfiniteStyle(above)
+    isfinite_style = GeometryStyle(below) & GeometryStyle(O) & GeometryStyle(above)
     operator_style = OperatorStyle(O)
     return environments(
         isfinite_style, operator_style, below, O, above; kwargs...
