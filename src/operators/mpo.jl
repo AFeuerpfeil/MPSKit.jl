@@ -58,7 +58,7 @@ DenseMPO(mpo::MPO) = mpo isa DenseMPO ? copy(mpo) : MPO(map(TensorMap, parent(mp
 # -------
 Base.parent(mpo::MPO) = mpo.O
 Base.copy(mpo::MPO) = MPO(copy.(parent(mpo)))
-eachsite(mpo::InfiniteMPO) = PeriodicArray(eachindex(mpo))
+eachsite(::InfiniteStyle, mpo::AbstractMPO) = PeriodicArray(eachindex(mpo))
 
 function Base.similar(mpo::MPO{<:MPOTensor}, ::Type{O}, L::Int) where {O <: MPOTensor}
     return MPO(similar(parent(mpo), O, L))
@@ -117,7 +117,7 @@ Base.complex(mpo::MPO) = MPO(map(complex, parent(mpo)))
 # VectorInterface.scalartype(::Type{FiniteMPO{O}}) where {O} = scalartype(O)
 
 Base.:+(mpo::MPO) = MPO(map(+, parent(mpo)))
-function Base.:+(mpo1::FiniteMPO{<:MPOTensor}, mpo2::FiniteMPO{<:MPOTensor})
+function Base.:+(::FiniteStyle, ::MPOStyle, mpo1::AbstractMPO, mpo2::AbstractMPO)
     N = check_length(mpo1, mpo2)
     @assert left_virtualspace(mpo1, 1) == left_virtualspace(mpo2, 1) &&
         right_virtualspace(mpo1, N) == right_virtualspace(mpo2, N)
@@ -220,7 +220,7 @@ function VectorInterface.scale!(dst::MPO, src::MPO, α::Number)
     return dst
 end
 
-function Base.:*(mpo1::FiniteMPO{<:MPOTensor}, mpo2::FiniteMPO{<:MPOTensor})
+function Base.:*(::FiniteStyle, ::MPOStyle, mpo1::AbstractMPO, mpo2::AbstractMPO)
     N = check_length(mpo1, mpo2)
     (S = spacetype(mpo1)) == spacetype(mpo2) || throw(SectorMismatch())
 
@@ -234,13 +234,13 @@ function Base.:*(mpo1::FiniteMPO{<:MPOTensor}, mpo2::FiniteMPO{<:MPOTensor})
     O = map(fuse_mul_mpo, parent(mpo1), parent(mpo2))
     return changebonds!(FiniteMPO(O), SvdCut(; trscheme = notrunc()))
 end
-function Base.:*(mpo1::InfiniteMPO, mpo2::InfiniteMPO)
+function Base.:*(::InfiniteStyle, ::MPOStyle, mpo1::AbstractMPO, mpo2::AbstractMPO)
     check_length(mpo1, mpo2)
     Os = map(fuse_mul_mpo, parent(mpo1), parent(mpo2))
     return InfiniteMPO(Os)
 end
 
-function Base.:*(mpo::FiniteMPO, mps::FiniteMPS)
+function Base.:*(::FiniteStyle, mpo::AbstractMPO, mps::AbstractMPS)
     N = check_length(mpo, mps)
     T = TensorOperations.promote_contract(scalartype(mpo), scalartype(mps))
     A = TensorKit.similarstoragetype(eltype(mps), T)
@@ -254,7 +254,8 @@ function Base.:*(mpo::FiniteMPO, mps::FiniteMPS)
     trscheme = trunctol(; atol = eps(real(T)))
     return changebonds!(FiniteMPS(A2), SvdCut(; trscheme); normalize = false)
 end
-function Base.:*(mpo::InfiniteMPO, mps::InfiniteMPS)
+
+function Base.:*(::InfiniteStyle, mpo::AbstractMPO, mps::AbstractMPS)
     L = check_length(mpo, mps)
     T = promote_type(scalartype(mpo), scalartype(mps))
     A = TensorKit.similarstoragetype(eltype(mps), T)
@@ -286,13 +287,13 @@ end
 # largest virtual space cut, but it might be better to just multithread both sides and meet
 # in the middle
 function TensorKit.dot(
-        bra::FiniteMPS{T}, mpo::FiniteMPO{<:MPOTensor}, ket::FiniteMPS{T}
-    ) where {T}
+        ::FiniteStyle, ::MPOStyle, bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS
+    )
     N = check_length(bra, mpo, ket)
     Nhalf = N ÷ 2
     # left half
     ρ_left = isomorphism(
-        storagetype(T),
+        storagetype(bra),
         left_virtualspace(bra, 1) ⊗ left_virtualspace(mpo, 1)',
         left_virtualspace(ket, 1)
     )
@@ -301,7 +302,7 @@ function TensorKit.dot(
 
     # right half
     ρ_right = isomorphism(
-        storagetype(T),
+        storagetype(bra),
         right_virtualspace(ket, N) ⊗ right_virtualspace(mpo, N),
         right_virtualspace(bra, N)
     )
@@ -316,7 +317,7 @@ function TensorKit.dot(
         conj(bra.C[Nhalf][3; 2])
 end
 function TensorKit.dot(
-        bra::InfiniteMPS, mpo::InfiniteMPO, ket::InfiniteMPS;
+        ::InfiniteStyle, ::MPOStyle, bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS;
         ishermitian = false, krylovdim = 30, kwargs...
     )
     ρ₀ = allocate_GL(bra, mpo, ket, 1)
@@ -348,7 +349,7 @@ function TensorKit.dot(mpo₁::FiniteMPO{<:MPOTensor}, mpo₂::FiniteMPO{<:MPOTe
     return @plansor ρ_left[1; 2] * ρ_right[2; 1]
 end
 
-function LinearAlgebra.tr(mpo::FiniteMPO)
+function LinearAlgebra.tr(::FiniteStyle, ::MPOStyle, mpo::AbstractMPO)
     N = length(mpo)
     # @assert BraidingStyle(sectortype(mpo)) isa SymmetricBraiding
     Nhalf = N ÷ 2
@@ -371,7 +372,7 @@ function LinearAlgebra.tr(mpo::FiniteMPO)
 
     return @plansor ρ_left[(); 1] * ρ_right[1; ()]
 end
-function LinearAlgebra.tr(mpo::InfiniteMPO; ishermitian = false, kwargs...)
+function LinearAlgebra.tr(::InfiniteStyle, ::MPOStyle, mpo::AbstractMPO; ishermitian = false, kwargs...)
     T = prod(parent(mpo)) do O
         @plansor Tᵢ[-1; -2] := O[-1 3; 1 2] * τ[1 2; -2 3]
     end

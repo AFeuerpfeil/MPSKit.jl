@@ -13,7 +13,8 @@ const SparseMPO{O <: SparseBlockTensorMap} = AbstractMPO{O}
 # By default, define things in terms of parent
 Base.size(mpo::AbstractMPO, args...) = size(parent(mpo), args...)
 Base.length(mpo::AbstractMPO) = length(parent(mpo))
-eachsite(mpo::AbstractMPO) = eachindex(mpo)
+eachsite(mpo::AbstractMPO) = eachsite(GeometryStyle(mpo), mpo)
+eachsite(::GeometryStyle, mpo::AbstractMPO) = eachindex(mpo)
 
 @inline Base.getindex(mpo::AbstractMPO, i::Int) = getindex(parent(mpo), i)
 @inline function Base.setindex!(mpo::AbstractMPO, value, i::Int)
@@ -39,46 +40,49 @@ end
 # -----------------
 remove_orphans!(mpo::AbstractMPO; tol = eps(real(scalartype(mpo)))^(3 / 4)) = mpo
 function remove_orphans!(mpo::SparseMPO; tol = eps(real(scalartype(mpo)))^(3 / 4))
+    return remove_orphans!(GeometryStyle(mpo), mpo; tol = tol)
+end
+function remove_orphans!(::FiniteStyle, mpo::AbstractMPO; tol = eps(real(scalartype(mpo)))^(3 / 4))
     droptol!.(mpo, tol)
 
-    if isfinite(mpo)
-        # Forward sweep
-        # col j on site i empty -> remove row j on site i + 1
-        for i in 1:(length(mpo) - 1)
+    # Forward sweep
+    # col j on site i empty -> remove row j on site i + 1
+    for i in 1:(length(mpo) - 1)
+        mask = filter(1:size(mpo[i], 4)) do j
+            return j ∈ getindex.(nonzero_keys(mpo[i]), 4)
+        end
+        mpo[i] = mpo[i][:, :, :, mask]
+        mpo[i + 1] = mpo[i + 1][mask, :, :, :]
+    end
+
+    # Backward sweep
+    # row j on site i empty -> remove col j on site i - 1
+    for i in length(mpo):-1:2
+        mask = filter(1:size(mpo[i], 1)) do j
+            return j ∈ getindex.(nonzero_keys(mpo[i]), 1)
+        end
+        mpo[i] = mpo[i][mask, :, :, :]
+        mpo[i - 1] = mpo[i - 1][:, :, :, mask]
+    end
+    return mpo
+end
+function remove_orphans!(::InfiniteStyle, mpo::AbstractMPO; tol = eps(real(scalartype(mpo)))^(3 / 4))
+    droptol!.(mpo, tol)
+    # drop dead starts/ends
+    changed = true
+    while changed
+        changed = false
+        for i in 1:length(mpo)
+            # slice empty columns on right or empty rows on left
             mask = filter(1:size(mpo[i], 4)) do j
-                return j ∈ getindex.(nonzero_keys(mpo[i]), 4)
+                return j ∈ getindex.(nonzero_keys(mpo[i]), 4) &&
+                    j ∈ getindex.(nonzero_keys(mpo[i + 1]), 1)
             end
+            changed |= length(mask) == size(mpo[i], 4)
             mpo[i] = mpo[i][:, :, :, mask]
             mpo[i + 1] = mpo[i + 1][mask, :, :, :]
         end
-
-        # Backward sweep
-        # row j on site i empty -> remove col j on site i - 1
-        for i in length(mpo):-1:2
-            mask = filter(1:size(mpo[i], 1)) do j
-                return j ∈ getindex.(nonzero_keys(mpo[i]), 1)
-            end
-            mpo[i] = mpo[i][mask, :, :, :]
-            mpo[i - 1] = mpo[i - 1][:, :, :, mask]
-        end
-    else
-        # drop dead starts/ends
-        changed = true
-        while changed
-            changed = false
-            for i in 1:length(mpo)
-                # slice empty columns on right or empty rows on left
-                mask = filter(1:size(mpo[i], 4)) do j
-                    return j ∈ getindex.(nonzero_keys(mpo[i]), 4) &&
-                        j ∈ getindex.(nonzero_keys(mpo[i + 1]), 1)
-                end
-                changed |= length(mask) == size(mpo[i], 4)
-                mpo[i] = mpo[i][:, :, :, mask]
-                mpo[i + 1] = mpo[i + 1][mask, :, :, :]
-            end
-        end
     end
-
     return mpo
 end
 
@@ -92,6 +96,23 @@ Base.:*(α::Number, mpo::AbstractMPO) = scale(mpo, α)
 Base.:*(mpo::AbstractMPO, α::Number) = scale(mpo, α)
 Base.:/(mpo::AbstractMPO, α::Number) = scale(mpo, inv(α))
 Base.:\(α::Number, mpo::AbstractMPO) = scale(mpo, inv(α))
+
+function Base.:+(mpo1::AbstractMPO, mpo2::AbstractMPO)
+    return +(GeometryStyle(mpo1) & GeometryStyle(mpo2), OperatorStyle(mpo1) & OperatorStyle(mpo2), mpo1, mpo2)
+end
+function Base.:*(mpo1::AbstractMPO, mpo2::AbstractMPO)
+    return *(GeometryStyle(mpo1) & GeometryStyle(mpo2), OperatorStyle(mpo1) & OperatorStyle(mpo2), mpo1, mpo2)
+end
+function Base.:*(mpo::AbstractMPO, mps::AbstractMPS)
+    return *(GeometryStyle(mpo) & GeometryStyle(mps), OperatorStyle(mpo), mpo, mps)
+end
+
+LinearAlgebra.tr(mpo::AbstractMPO; kwargs...) = tr(GeometryStyle(mpo), OperatorStyle(mpo), mpo; kwargs...)
+
+function TensorKit.dot(bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS; kwargs...)
+    return TensorKit.dot(GeometryStyle(bra) & GeometryStyle(mpo) & GeometryStyle(ket),
+        OperatorStyle(mpo), bra, mpo, ket; kwargs...)
+end
 
 function VectorInterface.scale(mpo::AbstractMPO, α::Number)
     T = VectorInterface.promote_scale(scalartype(mpo), scalartype(α))
