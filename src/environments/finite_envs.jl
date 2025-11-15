@@ -16,9 +16,8 @@ struct FiniteEnvironments{A, B, C, D} <: AbstractMPSEnvironments
     GRs::Vector{D}
 end
 
-function environments(below, (operator, above)::Tuple, args...; kwargs...)
-    return environments(below, operator, above, args...; kwargs...)
-end
+GeometryStyle(::Type{FiniteEnvironments}) = FiniteStyle()
+
 function environments(below, operator, leftstart, rightstart)
     return environments(below, operator, nothing, leftstart, rightstart)
 end
@@ -37,23 +36,26 @@ function environments(below, operator, above, leftstart, rightstart)
 end
 
 function environments(
-        below::FiniteMPS{S}, O::Union{FiniteMPO, FiniteMPOHamiltonian}, above = nothing
-    ) where {S}
+        ::FiniteStyle, ::OperatorStyle,
+        below::AbstractMPS, O::AbstractMPO, above::Union{AbstractMPS, Nothing}
+    )
     Vl_bot = left_virtualspace(below, 1)
     Vl_mid = left_virtualspace(O, 1)
-    Vl_top = isnothing(above) ? left_virtualspace(below, 1) : left_virtualspace(above, 1)
-    leftstart = isomorphism(storagetype(S), Vl_bot ⊗ Vl_mid' ← Vl_top)
+    Vl_top = left_virtualspace(above, 1)
+    leftstart = isomorphism(storagetype(below), Vl_bot ⊗ Vl_mid' ← Vl_top)
 
     N = length(below)
     Vr_bot = right_virtualspace(below, N)
     Vr_mid = right_virtualspace(O, N)
-    Vr_top = isnothing(above) ? right_virtualspace(below, N) : right_virtualspace(above, N)
-    rightstart = isomorphism(storagetype(S), Vr_top ⊗ Vr_mid ← Vr_bot)
+    Vr_top = right_virtualspace(above, N)
+    rightstart = isomorphism(storagetype(below), Vr_top ⊗ Vr_mid ← Vr_bot)
 
     return environments(below, O, above, leftstart, rightstart)
 end
+
 function environments(
-        below::WindowMPS, O::Union{InfiniteMPOHamiltonian, InfiniteMPO}, above = nothing;
+        ::WindowStyle, ::OperatorStyle,
+        below::AbstractMPS, O::AbstractMPO, above::Union{AbstractMPS, Nothing};
         lenvs = environments(below.left_gs, O),
         renvs = environments(below.right_gs, O)
     )
@@ -63,17 +65,27 @@ function environments(
     return environments(below, O, above, leftstart, rightstart)
 end
 
-function environments(below::S, above::S) where {S <: Union{FiniteMPS, WindowMPS}}
-    S isa WindowMPS &&
-        (above.left_gs == below.left_gs || throw(ArgumentError("left gs differs")))
-    S isa WindowMPS &&
-        (above.right_gs == below.right_gs || throw(ArgumentError("right gs differs")))
+function environments(below::AbstractMPS, above::AbstractMPS)
+    return environments(GeometryStyle(below) & GeometryStyle(above), below, above)
+end
+function environments(::FiniteStyle, below::FiniteMPS, above::FiniteMPS)
+    operator = fill(nothing, length(below))
+    return environments(below, operator, above, l_LL(above), r_RR(above))
+end
+function environments(::WindowStyle, below::WindowMPS, above::WindowMPS)
+    below.left_gs == above.left_gs ||
+        throw(ArgumentError("left gs differs"))
+    below.right_gs == above.right_gs ||
+        throw(ArgumentError("right gs differs"))
 
     operator = fill(nothing, length(below))
     return environments(below, operator, above, l_LL(above), r_RR(above))
 end
 
-function environments(state::Union{FiniteMPS, WindowMPS}, operator::ProjectionOperator)
+function environments(state::AbstractMPS, operator::ProjectionOperator)
+    return environments(GeometryStyle(state), state, operator)
+end
+function environments(::Union{FiniteStyle, WindowStyle}, state::FiniteMPS, operator::ProjectionOperator)
     @plansor leftstart[-1; -2 -3 -4] := l_LL(operator.ket)[-3; -4] *
         l_LL(operator.ket)[-1; -2]
     @plansor rightstart[-1; -2 -3 -4] := r_RR(operator.ket)[-1; -2] *
@@ -85,13 +97,13 @@ function environments(state::Union{FiniteMPS, WindowMPS}, operator::ProjectionOp
 end
 
 #notify the cache that we updated in-place, so it should invalidate the dependencies
-function poison!(ca::FiniteEnvironments, ind)
+poison!(ca::AbstractMPSEnvironments, ind) = poison!(GeometryStyle(ca), ca, ind)
+function poison!(::FiniteStyle, ca::AbstractMPSEnvironments, ind)
     ca.ldependencies[ind] = similar(ca.ldependencies[ind])
     return ca.rdependencies[ind] = similar(ca.rdependencies[ind])
 end
 
-#rightenv[ind] will be contracteable with the tensor on site [ind]
-function rightenv(ca::FiniteEnvironments, ind, state)
+function rightenv(::FiniteStyle, ca::AbstractMPSEnvironments, ind, state::AbstractMPS)
     a = findfirst(i -> !(state.AR[i] === ca.rdependencies[i]), length(state):-1:(ind + 1))
     a = isnothing(a) ? nothing : length(state) - a + 1
 
@@ -108,7 +120,7 @@ function rightenv(ca::FiniteEnvironments, ind, state)
     return ca.GRs[ind + 1]
 end
 
-function leftenv(ca::FiniteEnvironments, ind, state)
+function leftenv(::FiniteStyle, ca::AbstractMPSEnvironments, ind, state::AbstractMPS)
     a = findfirst(i -> !(state.AL[i] === ca.ldependencies[i]), 1:(ind - 1))
 
     if !isnothing(a)

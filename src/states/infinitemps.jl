@@ -319,7 +319,7 @@ l_RL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1) = ψ.C[loc - 1]
 l_LR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1) = ψ.C[loc - 1]'
 
 function l_LL(::InfiniteStyle, ψ::AbstractMPS, loc::Int = 1)
-    return isomorphism(storagetype(ψ.AL[1]), left_virtualspace(ψ, loc), left_virtualspace(ψ, loc))
+    return isomorphism(storagetype(ψ), left_virtualspace(ψ, loc), left_virtualspace(ψ, loc))
 end
 
 function r_RR(::InfiniteStyle, ψ::AbstractMPS, loc::Int = length(ψ))

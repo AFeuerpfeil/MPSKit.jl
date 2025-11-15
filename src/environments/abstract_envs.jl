@@ -68,27 +68,82 @@ end
 
 Determine an appropriate algorithm for computing the environments, based on the given `kwargs...`.
 """
+function environment_alg(below::AbstractMPS, operator::AbstractMPO, above::AbstractMPS; kwargs...)
+    isfinite_style = GeometryStyle(below) & GeometryStyle(operator) & GeometryStyle(above)
+    operator_style = OperatorStyle(operator)
+    return environment_alg(isfinite_style, operator_style, below, operator, above; kwargs...)
+end
+
 function environment_alg(
-        ::Union{InfiniteMPS, MultilineMPS}, ::Union{InfiniteMPO, MultilineMPO},
-        ::Union{InfiniteMPS, MultilineMPS};
+        ::InfiniteStyle, ::MPOStyle, ::AbstractMPS, ::AbstractMPO, ::AbstractMPS;
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
         verbosity = Defaults.VERBOSE_NONE, eager = true
     )
     return Arnoldi(; tol, maxiter, krylovdim, verbosity, eager)
 end
+
 function environment_alg(
-        below, ::InfiniteMPOHamiltonian, above;
+        ::InfiniteStyle, ::HamiltonianStyle, below::AbstractMPS, ::AbstractMPO, above::AbstractMPS;
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
         verbosity = Defaults.VERBOSE_NONE
     )
     max_krylovdim = dim(left_virtualspace(above, 1)) * dim(left_virtualspace(below, 1))
     return GMRES(; tol, maxiter, krylovdim = min(max_krylovdim, krylovdim), verbosity)
 end
+
 function environment_alg(
-        ::Union{InfiniteQP, MultilineQP}, ::Union{InfiniteMPO, MultilineMPO},
-        ::Union{InfiniteQP, MultilineQP};
+        ::InfiniteStyle, ::MPOStyle, ::QP, ::AbstractMPO, ::QP;
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
         verbosity = Defaults.VERBOSE_NONE
     )
     return GMRES(; tol, maxiter, krylovdim, verbosity)
+end
+
+# Environment constructors
+# ----------------------
+function environments(below, (operator, above)::Tuple, args...; kwargs...)
+    return environments(below, operator, above, args...; kwargs...)
+end
+
+function environments(
+        below::AbstractMPS, O::AbstractMPO, above::AbstractMPS; kwargs...
+    )
+    isfinite_style = GeometryStyle(below) & GeometryStyle(O) & GeometryStyle(above)
+    operator_style = OperatorStyle(O)
+    return environments(
+        isfinite_style, operator_style, below, O, above; kwargs...
+    )
+end
+
+#rightenv[ind] will be contractable with the tensor on site [ind]
+function rightenv(ca::AbstractMPSEnvironments, ind, state::AbstractMPS)
+    return rightenv(GeometryStyle(ca) & GeometryStyle(state), ca, ind, state)
+end
+
+function leftenv(ca::AbstractMPSEnvironments, ind, state::AbstractMPS)
+    return leftenv(GeometryStyle(ca) & GeometryStyle(state), ca, ind, state)
+end
+
+function recalculate!(envs::AbstractMPSEnvironments,
+        below::AbstractMPS,  operator::AbstractMPO, above::AbstractMPS;
+        kwargs...
+    )
+    geometry_style = GeometryStyle(envs) & GeometryStyle(below)
+        & GeometryStyle(operator) & GeometryStyle(above)
+    operator_style = OperatorStyle(operator)
+    return recalculate!(
+        geometry_style, operator_style, envs, below, operator, above; kwargs...
+    )
+end
+
+function TensorKit.normalize!(
+        envs::AbstractMPSEnvironments, below::AbstractMPS,
+        operator::AbstractMPO, above::AbstractMPS
+    )
+    geometry_style = GeometryStyle(envs) & GeometryStyle(below)
+        & GeometryStyle(operator) & GeometryStyle(above)
+    operator_style = OperatorStyle(operator)
+    return TensorKit.normalize!(
+        geometry_style, operator_style, envs, below, operator, above
+    )
 end
