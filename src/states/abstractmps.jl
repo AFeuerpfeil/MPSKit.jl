@@ -15,7 +15,7 @@ const MPSTensor{S} = GenericMPSTensor{S, 2} # the usual mps tensors on which we 
 
 """
     MPSTensor([f, eltype], d::Int, left_D::Int, [right_D]::Int])
-    MPSTensor([f, eltype], physicalspace::Union{S,CompositeSpace{S}},
+    MPSTensor([f, eltype], physicalspace::Union{S,CompositeSpace{S}}, 
               left_virtualspace::S, [right_virtualspace]::S) where {S<:ElementarySpace}
 
 Construct an `MPSTensor` with given physical and virtual spaces.
@@ -251,8 +251,9 @@ eachsite(ψ::AbstractMPS) = eachsite(GeometryStyle(ψ), ψ)
 
 eachsite(::GeometryStyle, ψ::AbstractMPS) = eachindex(ψ)
 
-# TensorKit utility
-# -----------------
+#===========================================================================================
+TensorKit utility
+===========================================================================================#
 
 function TensorKit.dot(ψ₁::AbstractMPS, ψ₂::AbstractMPS; kwargs...)
     geometry_style = GeometryStyle(ψ₁) & GeometryStyle(ψ₂)
@@ -264,6 +265,7 @@ end
 TensorKit.norm(ψ::AbstractMPS) = TensorKit.norm(GeometryStyle(ψ), ψ)
 TensorKit.normalize!(ψ::AbstractMPS) = TensorKit.normalize!(GeometryStyle(ψ), ψ)
 TensorKit.normalize(ψ::AbstractMPS) = normalize!(copy(ψ))
+
 #===========================================================================================
 Fixedpoints
 ===========================================================================================#
