@@ -32,14 +32,14 @@ function find_groundstate(
     return find_groundstate!(copy(ψ), H, envs; kwargs...)
 end
 function find_groundstate(
-        ψ::AbstractMPS, H, alg, 
+        ψ::AbstractMPS, H, alg,
         envs::AbstractMPSEnvironments = environments(ψ, H)
     )
     return find_groundstate!(copy(ψ), H, alg, envs; tol, maxiter, verbosity, trscheme)
 end
 function find_groundstate!(
         ψ::AbstractMPS, H, envs::AbstractMPSEnvironments = environments(ψ, H);
-        tol = Defaults.tol, maxiter = Defaults.maxiter, 
+        tol = Defaults.tol, maxiter = Defaults.maxiter,
         verbosity = Defaults.verbosity, trscheme = nothing
     )
     if GeometryStyle(ψ, H) isa InfiniteChainStyle
@@ -61,7 +61,7 @@ function find_groundstate!(
     return find_groundstate!(ψ, H, alg, envs)
 end
 function find_groundstate!(
-        ψ::AbstractMPS, H, alg::Algorithm, 
+        ψ::AbstractMPS, H, alg::Algorithm,
         envs::AbstractMPSEnvironments = environments(ψ, H)
     )
     return find_groundstate!(GeometryStyle(ψ, H), ψ, H, alg, envs)
