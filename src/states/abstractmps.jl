@@ -110,11 +110,11 @@ function isfullrank(V::TensorKit.TensorMapSpace; side = :both)
 end
 
 """
-    makefullrank!(A::PeriodicVector{<:GenericMPSTensor}; alg=Defaults.alg_qr())
+    makefullrank!(A::AbstractVector{<:GenericMPSTensor}; alg=Defaults.alg_qr())
 
 Make the set of MPS tensors full rank by performing a series of orthogonalizations.
 """
-function makefullrank!(A::PeriodicVector{<:GenericMPSTensor}; alg_leftorth = Defaults.alg_qr(), alg_rightorth = Defaults.alg_lq())
+function makefullrank!(A::AbstractVector{<:GenericMPSTensor}; alg_leftorth = Defaults.alg_qr(), alg_rightorth = Defaults.alg_lq())
     while true
         i = findfirst(!isfullrank, A)
         isnothing(i) && break
@@ -130,7 +130,7 @@ function makefullrank!(A::PeriodicVector{<:GenericMPSTensor}; alg_leftorth = Def
     return A
 end
 
-function makefullrank!(virtualspaces::PeriodicVector{S}, physicalspaces::PeriodicVector{S}) where {S <: ElementarySpace}
+function makefullrank!(virtualspaces::AbstractVector{S}, physicalspaces::AbstractVector{S}) where {S <: ElementarySpace}
     haschanged = true
     while haschanged
         haschanged = false

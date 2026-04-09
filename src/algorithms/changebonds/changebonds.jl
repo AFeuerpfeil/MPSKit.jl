@@ -20,7 +20,7 @@ function changebonds(
 end
 
 _expand(ψ, AL′, AR′) = _expand!(copy(ψ), AL′, AR′)
-function _expand!(ψ::InfiniteMPS, AL′::PeriodicVector, AR′::PeriodicVector)
+function _expand!(ψ, AL′::AbstractVector, AR′::AbstractVector)
     for i in 1:length(ψ)
         # update AL: add vectors, make room for new vectors:
         # AL -> [AL expansion; 0 0]
@@ -46,7 +46,7 @@ function _expand!(ψ::InfiniteMPS, AL′::PeriodicVector, AR′::PeriodicVector)
     end
     return normalize!(ψ)
 end
-function _expand!(ψ::MultilineMPS, AL′::PeriodicMatrix, AR′::PeriodicMatrix)
+function _expand!(ψ::MultilineMPS, AL′::AbstractMatrix, AR′::AbstractMatrix)
     for i in 1:size(ψ, 1)
         _expand!(ψ[i], AL′[i, :], AR′[i, :])
     end

@@ -45,8 +45,9 @@ struct VUMPSState{S, O, E}
     which::Symbol
 end
 
-function find_groundstate(
-        mps::InfiniteMPS, operator, alg::VUMPS, envs = environments(mps, operator)
+function find_groundstate!(
+        ::InfiniteChainStyle, mps, operator, alg::VUMPS,
+        envs = environments(mps, operator)
     )
     return dominant_eigsolve(operator, mps, alg, envs; which = :SR)
 end

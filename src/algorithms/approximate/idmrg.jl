@@ -120,12 +120,9 @@ function approximate!(
 
             # update error
             ϵ = sum(zip(C_current, ψ.C[:, 0])) do (c1, c2)
-                smallest = infimum(_firstspace(c1), _firstspace(c2))
-                e1 = isometry(_firstspace(c1), smallest)
-                e2 = isometry(_firstspace(c2), smallest)
-                return norm(e2' * c2 * e2 - e1' * c1 * e1)
+                return bond_error(c1, c2)
             end
-
+            
             if ϵ < alg.tol
                 @infov 2 logfinish!(log, iter, ϵ)
                 break

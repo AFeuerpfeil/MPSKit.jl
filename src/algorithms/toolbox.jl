@@ -464,3 +464,28 @@ function open_boundary_conditions(mpo::InfiniteMPOHamiltonian, L = length(mpo))
 
     return FiniteMPOHamiltonian(output)
 end
+
+
+
+
+function bond_error(A::MPSBondTensor, B::MPSBondTensor)
+    L_space_A = left_virtualspace(A)
+    R_space_A = right_virtualspace(A)
+    L_space_B = left_virtualspace(B)
+    R_space_B = right_virtualspace(B)
+    if L_space_A != L_space_B 
+        smallest = infimum(L_space_A, L_space_B)
+        e1 = isometry(L_space_A, smallest)
+        e2 = isometry(L_space_B, smallest)
+        A = e1' * A
+        B = e2' * B
+    end
+    if R_space_A != R_space_B
+        smallest = infimum(R_space_A, R_space_B)
+        e1 = isometry(R_space_A, smallest)
+        e2 = isometry(R_space_B, smallest)
+        A = A * e1
+        B = B * e2
+    end
+    return norm(A - B)
+end

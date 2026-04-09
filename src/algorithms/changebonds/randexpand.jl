@@ -1,3 +1,4 @@
+
 """
 $(TYPEDEF)
 
@@ -5,9 +6,6 @@ An algorithm that expands the bond dimension by adding random unitary vectors th
 orthogonal to the existing state. This means that additional directions are added to
 `AL` and `AR` that are contained in the nullspace of both. Note that this is happens in
 parallel, and therefore the expansion will never go beyond the local two-site subspace.
-
-The truncation strategy dictates the number of expanded states, by generating uniformly
-distributed weights for each state in the two-site space and truncating that.
 
 ## Fields
 
@@ -35,8 +33,8 @@ function changebonds!(ψ::InfiniteMPS, alg::RandExpand)
         # obtain (orthogonal) directions as isometries in that direction
         XL = randisometry(scalartype(VL), right_virtualspace(VL) ← V)
         AL′[i] = VL * XL
-        XR = randisometry(scalartype(VR), space(VR, 1) ← V)
-        AR′[i + 1] = XR' * VR
+        XR = randisometry(storagetype(VL), space(VR, 1) ← V)
+        AR′[i + 1] = XR * VR
     end
 
     return _expand!(ψ, AL′, AR′)
@@ -87,3 +85,92 @@ function sample_space(V, strategy)
     ind = MatrixAlgebraKit.findtruncated(S, strategy)
     return TensorKit.Factorizations.truncate_space(V, ind)
 end
+
+
+
+"""
+$(TYPEDEF)
+
+An algorithm that expands the bond dimension by adding random unitary vectors that are
+orthogonal to the existing state, in a sweeping fashion. Additionally, some random noise
+is added to the state in order for it to remain gauge-able.
+
+## Fields
+
+$(TYPEDFIELDS)
+"""
+@kwdef struct RandPerturbedExpand{S} <: Algorithm
+    "algorithm used for the singular value decomposition"
+    alg_svd::S = Defaults.alg_svd()
+
+    "algorithm used for [truncation](@extref MatrixAlgebraKit.TruncationStrategy] the expanded space"
+    trscheme::TruncationStrategy
+
+    "amount of noise that is added to the current state"
+    noisefactor::Float64 = eps()^(3 / 4)
+
+    "algorithm used for gauging the state"
+    alg_gauge = Defaults.alg_gauge(; dynamic_tols = false)
+end
+
+function changebonds!(ψ, alg::RandPerturbedExpand)
+    for i in 1:length(ψ)
+        # obtain space by sampling the support of left nullspace
+        # add (orthogonal) directions as isometries in that direction
+        VL = left_null(ψ.AL[i])
+        V = sample_space(right_virtualspace(VL), alg.trscheme)
+        XL = randisometry(scalartype(VL), right_virtualspace(VL) ← V)
+        ψ.AL[i] = catdomain(ψ.AL[i], VL * XL)
+
+        # make sure the next site fits, by "absorbing" into a larger tensor
+        # with some random noise to ensure state is still gauge-able
+        AL = ψ.AL[i + 1]
+        AL′ = similar(AL, right_virtualspace(ψ.AL[i]) ⊗ physicalspace(AL) ← right_virtualspace(AL))
+        scale!(randn!(AL′), alg.noisefactor)
+        ψ.AL[i + 1] = TensorKit.absorb!(AL′, AL)
+    end
+
+    # properly regauge the state:
+    makefullrank!(ψ.AL)
+    ψ.AR .= similar.(ψ.AL)
+    # ψ.AC .= similar.(ψ.AL)
+
+    # initial guess for gauge is embedded original C
+    C₀ = similar(ψ.C[0], right_virtualspace(ψ.AL[end]) ← left_virtualspace(ψ.AL[1]))
+    absorb!(id!(C₀), ψ.C[0])
+
+    gaugefix!(ψ, ψ.AL, C₀; order = :R, alg.alg_gauge.maxiter, alg.alg_gauge.tol)
+
+    for i in reverse(1:length(ψ))
+        # obtain space by sampling the support of left nullspace
+        # add (orthogonal) directions as isometries in that direction
+        AR_tail = _transpose_tail(ψ.AR[i]; copy = true)
+        VR = right_null(AR_tail)
+        V = sample_space(space(VR, 1), alg.trscheme)
+        XR = randisometry(scalartype(VR), space(VR, 1) ← V)
+        ψ.AR[i] = _transpose_front(catcodomain(AR_tail, XR' * VR))
+
+        # make sure the next site fits, by "absorbing" into a larger tensor
+        # with some random noise to ensure state is still gauge-able
+        AR = ψ.AR[i - 1]
+        AR′ = similar(AR, left_virtualspace(AR) ⊗ physicalspace(AR) ← left_virtualspace(ψ.AR[i]))
+        scale!(randn!(AR′), alg.noisefactor)
+        ψ.AR[i - 1] = TensorKit.absorb!(AR′, AR)
+    end
+
+    # properly regauge the state:
+    makefullrank!(ψ.AR)
+    ψ.AL .= similar.(ψ.AR)
+    ψ.AC .= similar.(ψ.AR)
+
+    # initial guess for gauge is embedded original C
+    C₀ = similar(ψ.C[0], right_virtualspace(ψ.AR[end]) ← left_virtualspace(ψ.AR[1]))
+    absorb!(id!(C₀), ψ.C[0])
+
+    gaugefix!(ψ, ψ.AR, C₀; order = :LR, alg.alg_gauge.maxiter, alg.alg_gauge.tol)
+    mul!.(ψ.AC, ψ.AL, ψ.C)
+
+    return ψ
+end
+
+changebonds(ψ, alg::RandPerturbedExpand) = changebonds!(copy(ψ), alg)

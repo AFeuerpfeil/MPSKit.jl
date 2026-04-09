@@ -160,6 +160,8 @@ $(TYPEDFIELDS)
     "algorithm used for truncation of the two-site update"
     trscheme::TruncationStrategy
 
+    expscheme::Algorithm = NoExpand()
+
     "callback function applied after each iteration, of signature `finalize(iter, ψ, H, envs) -> ψ, envs`"
     finalize::F = Defaults._finalize
 end
@@ -177,6 +179,7 @@ function timestep!(
         ac2′ = integrate(Hac2, ac2, t, dt / 2, alg.integrator; imaginary_evolution)
 
         nal, nc, nar = svd_trunc!(ac2′; trunc = alg.trscheme, alg = alg.alg_svd)
+        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme)
         ψ.AC[i] = (nal, complex(nc))
         ψ.AC[i + 1] = (complex(nc), _transpose_front(nar))
 
@@ -196,6 +199,7 @@ function timestep!(
         ac2′ = integrate(Hac2, ac2, t + dt / 2, dt / 2, alg.integrator; imaginary_evolution)
 
         nal, nc, nar = svd_trunc!(ac2′; trunc = alg.trscheme, alg = alg.alg_svd)
+        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme)
         ψ.AC[i - 1] = (nal, complex(nc))
         ψ.AC[i] = (complex(nc), _transpose_front(nar))
 

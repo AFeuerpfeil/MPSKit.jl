@@ -15,56 +15,48 @@ Base.unlock(envs::AbstractMPSEnvironments) = unlock(envs.lock);
 # ------------------
 function allocate_GL(bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS, i::Int)
     T = Base.promote_type(scalartype(bra), scalartype(mpo), scalartype(ket))
-    M = TensorKit.promote_storagetype(T, eltype(mpo), eltype(bra), eltype(ket))
-    S = TensorKit.check_spacetype(bra, mpo, ket)
     V = left_virtualspace(bra, i) ⊗ left_virtualspace(mpo, i)' ←
         left_virtualspace(ket, i)
     if V isa BlockTensorKit.TensorMapSumSpace
-        TT = blocktensormaptype(S, numout(V), numin(V), M)
+        TT = blocktensormaptype(spacetype(bra), numout(V), numin(V), T)
     else
-        TT = tensormaptype(S, numout(V), numin(V), M)
+        TT = TensorMap{T}
     end
     return TT(undef, V)
 end
 
 function allocate_GR(bra::AbstractMPS, mpo::AbstractMPO, ket::AbstractMPS, i::Int)
     T = Base.promote_type(scalartype(bra), scalartype(mpo), scalartype(ket))
-    M = TensorKit.promote_storagetype(T, eltype(mpo), eltype(bra), eltype(ket))
-    S = TensorKit.check_spacetype(bra, mpo, ket)
     V = right_virtualspace(ket, i) ⊗ right_virtualspace(mpo, i) ←
         right_virtualspace(bra, i)
     if V isa BlockTensorKit.TensorMapSumSpace
-        TT = blocktensormaptype(S, numout(V), numin(V), M)
+        TT = blocktensormaptype(spacetype(bra), numout(V), numin(V), T)
     else
-        TT = tensormaptype(S, numout(V), numin(V), M)
+        TT = TensorMap{T}
     end
     return TT(undef, V)
 end
 
 function allocate_GBL(bra::QP, mpo::AbstractMPO, ket::QP, i::Int)
     T = Base.promote_type(scalartype(bra), scalartype(mpo), scalartype(ket))
-    M = TensorKit.promote_storagetype(T, eltype(mpo), eltype(bra), eltype(ket))
-    S = TensorKit.check_spacetype(bra, mpo, ket)
     V = left_virtualspace(bra.left_gs, i) ⊗ left_virtualspace(mpo, i)' ←
         auxiliaryspace(ket)' ⊗ left_virtualspace(ket.right_gs, i)
     if V isa BlockTensorKit.TensorMapSumSpace
-        TT = blocktensormaptype(S, numout(V), numin(V), M)
+        TT = blocktensormaptype(spacetype(bra), numout(V), numin(V), T)
     else
-        TT = tensormaptype(S, numout(V), numin(V), M)
+        TT = TensorMap{T}
     end
     return TT(undef, V)
 end
 
 function allocate_GBR(bra::QP, mpo::AbstractMPO, ket::QP, i::Int)
     T = Base.promote_type(scalartype(bra), scalartype(mpo), scalartype(ket))
-    M = TensorKit.promote_storagetype(T, eltype(mpo), eltype(bra), eltype(ket))
-    S = TensorKit.check_spacetype(bra, mpo, ket)
     V = right_virtualspace(ket.left_gs, i) ⊗ right_virtualspace(mpo, i) ←
         auxiliaryspace(ket)' ⊗ right_virtualspace(bra.right_gs, i)
     if V isa BlockTensorKit.TensorMapSumSpace
-        TT = blocktensormaptype(S, numout(V), numin(V), M)
+        TT = blocktensormaptype(spacetype(bra), numout(V), numin(V), T)
     else
-        TT = tensormaptype(S, numout(V), numin(V), M)
+        TT = TensorMap{T}
     end
     return TT(undef, V)
 end
@@ -77,15 +69,22 @@ end
 Determine an appropriate algorithm for computing the environments, based on the given `kwargs...`.
 """
 function environment_alg(
-        ::Union{InfiniteMPS, MultilineMPS}, ::Union{InfiniteMPO, MultilineMPO},
-        ::Union{InfiniteMPS, MultilineMPS};
+        below, operator, above; kwargs...
+    )
+    return environment_alg(
+        GeometryStyle(below, operator, above), OperatorStyle(operator),
+        below, operator, above; kwargs...
+    )
+end
+function environment_alg(
+        ::InfiniteChainStyle, ::MPOStyle, below, operator, above;
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
-        verbosity = Defaults.VERBOSE_NONE, eager = true
+        verbosity = Defaults.VERBOSE_NONE, eager = true,
     )
     return Arnoldi(; tol, maxiter, krylovdim, verbosity, eager)
 end
 function environment_alg(
-        below, ::InfiniteMPOHamiltonian, above;
+        ::InfiniteChainStyle, ::HamiltonianStyle, below, operator, above;
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
         verbosity = Defaults.VERBOSE_NONE
     )
@@ -93,6 +92,7 @@ function environment_alg(
     return GMRES(; tol, maxiter, krylovdim = min(max_krylovdim, krylovdim), verbosity)
 end
 function environment_alg(
+        ::InfiniteChainStyle, ::MPOStyle,
         ::Union{InfiniteQP, MultilineQP}, ::Union{InfiniteMPO, MultilineMPO},
         ::Union{InfiniteQP, MultilineQP};
         tol = Defaults.tol, maxiter = Defaults.maxiter, krylovdim = Defaults.krylovdim,
