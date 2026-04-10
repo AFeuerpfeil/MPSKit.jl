@@ -49,21 +49,22 @@ struct DynamicTruncation{T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T
     tol_factor::T6
     rank_factor::T7
     function DynamicTruncation(;
-        atol=nothing,
-        atol_min = isnothing(atol) ? nothing : zero(atol),
-        rtol=nothing,
-        rtol_min = isnothing(rtol) ? nothing : zero(rtol),
-        maxrank=nothing,
-        maxrank_max = isnothing(maxrank) ? nothing : typemax(Int),
-        maxerror=nothing,
-        maxerror_min = isnothing(maxerror) ? nothing : zero(maxerror),
-        filter=nothing,
-        tol_factor=1.0,
-        rank_factor=1.0
-    )
-    @assert isnothing(tol_factor) || 1 >= tol_factor > 0 "tol_factor must be in (0, 1]"
-    @assert isnothing(rank_factor) || rank_factor >= 0 "rank_factor must be positive"
-    return new(atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor)
+            atol=nothing,
+            atol_min = isnothing(atol) ? nothing : zero(atol),
+            rtol=nothing,
+            rtol_min = isnothing(rtol) ? nothing : zero(rtol),
+            maxrank=nothing,
+            maxrank_max = isnothing(maxrank) ? nothing : typemax(Int),
+            maxerror=nothing,
+            maxerror_min = isnothing(maxerror) ? nothing : zero(maxerror),
+            filter=nothing,
+            tol_factor=1.0,
+            rank_factor=1.0
+        )
+        @assert isnothing(tol_factor) || 1 >= tol_factor > 0 "tol_factor must be in (0, 1]"
+        @assert isnothing(rank_factor) || rank_factor >= 0 "rank_factor must be positive"
+        return new(atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor)
+    end
 end
 
 function _clamp(a::Nothing,b,c,factor)
@@ -107,4 +108,7 @@ function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank:
         maxerror = new_maxerror,
         maxrank = new_maxrank,
     )
+end
+
+
 end
