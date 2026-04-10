@@ -95,7 +95,7 @@ include("utility/dynamictols.jl")
 using .DynamicTols
 
 include("utility/dynamictruncation.jl")
-using .DynamicTruncation
+using .DynamicTruncations
 
 include("utility/defaults.jl")
 using .Defaults: VERBOSE_NONE, VERBOSE_WARN, VERBOSE_CONV, VERBOSE_ITER, VERBOSE_ALL

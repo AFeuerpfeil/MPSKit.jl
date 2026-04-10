@@ -4,6 +4,7 @@ const RealOrNothing = Union{Real, Nothing}
 
 import ..MPSKit: Algorithm
 using MatrixAlgebraKit
+import MatrixAlgebraKit: TruncationStrategy
 using DocStringExtensions
 
 export updatetruncation, DynamicTruncation
@@ -63,7 +64,8 @@ struct DynamicTruncation{T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T
         )
         @assert isnothing(tol_factor) || 1 >= tol_factor > 0 "tol_factor must be in (0, 1]"
         @assert isnothing(rank_factor) || rank_factor >= 0 "rank_factor must be positive"
-        return new(atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor)
+        T1 = typeof(atol); T2 = typeof(rtol); T3 = typeof(maxrank); T4 = typeof(maxerror); T5 = typeof(filter); T6 = typeof(tol_factor); T7 = typeof(rank_factor)
+        return new{T1,T2,T3,T4,T5,T6,T7}(atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor)
     end
 end
 
