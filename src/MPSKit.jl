@@ -94,6 +94,9 @@ include("algorithms/algorithm.jl")
 include("utility/dynamictols.jl")
 using .DynamicTols
 
+include("utility/dynamictruncation.jl")
+using .DynamicTruncation
+
 include("utility/defaults.jl")
 using .Defaults: VERBOSE_NONE, VERBOSE_WARN, VERBOSE_CONV, VERBOSE_ITER, VERBOSE_ALL
 include("utility/logging.jl")
@@ -107,6 +110,7 @@ include("utility/multiline.jl")
 include("utility/utility.jl") # random utility functions
 include("utility/plotting.jl")
 include("utility/linearcombination.jl")
+include("utility/dynamictruncation.jl")
 
 # maybe we should introduce an abstract state type
 include("states/abstractmps.jl")
@@ -156,6 +160,7 @@ include("algorithms/changebonds/vumpssvd.jl")
 include("algorithms/changebonds/svdcut.jl")
 include("algorithms/changebonds/randexpand.jl")
 include("algorithms/changebonds/localexpand.jl")
+include("algorithms/changebonds/truncation.jl")
 
 include("algorithms/timestep/tdvp.jl")
 include("algorithms/timestep/taylorcluster.jl")

@@ -22,10 +22,13 @@ $(TYPEDFIELDS)
     "algorithm used for gauging the MPS"
     alg_gauge = Defaults.alg_gauge()
 
+
     "algorithm used for the eigenvalue solvers"
     alg_eigsolve::A = Defaults.alg_eigsolve()
 
-    expscheme::Algorithm = NoExpand()
+    expscheme::TruncationStrategy = noexpand()
+
+    trscheme::TruncationStrategy = notrunc()
 end
 
 """
@@ -58,10 +61,10 @@ $(TYPEDFIELDS)
     "algorithm used for the singular value decomposition"
     alg_svd::S = Defaults.alg_svd()
 
-    expscheme::Algorithm = NoExpand()
+    expscheme::TruncationStrategy = noexpand()
 
     "algorithm used for [truncation](@extref MatrixAlgebraKit.TruncationStrategy) of the two-site update"
-    trscheme::TruncationStrategy
+    trscheme::TruncationStrategy = notrunc()
 end
 
 
@@ -79,9 +82,9 @@ function IDMRGState{T}(mps::S, operator::O, envs::E, iter::Int, ϵ::Float64, ene
 end
 
 function find_groundstate!(
-        ::InfiniteChainStyle, mps, operator, alg::alg_type,
+        ::InfiniteChainStyle, mps::S, operator, alg::alg_type,
         envs = environments(mps, operator)
-    ) where {alg_type <: Union{<:IDMRG, <:IDMRG2}}
+    ) where {alg_type <: Union{<:IDMRG, <:IDMRG2}, S}
     (length(mps) ≤ 1 && alg isa IDMRG2) && throw(ArgumentError("unit cell should be >= 2"))
     log = alg isa IDMRG ? IterLog("IDMRG") : IterLog("IDMRG2")
     iter = 0
@@ -111,8 +114,9 @@ function find_groundstate!(
             @infov 3 logiter!(log, it.iter, ϵ, ΔE)
         end
 
-        alg_gauge = updatetol(alg.alg_gauge, it.state.iter, it.state.ϵ)
-        ψ′ = InfiniteMPS(it.state.mps.AR; alg_gauge.tol, alg_gauge.maxiter)
+        alg_gauge = updatetol(alg.alg_gauge, it.iter, it.ϵ)
+        ψ′ = S.name.wrapper(it.state.mps.AR; alg_gauge.tol, alg_gauge.maxiter)
+
         envs = recalculate!(it.state.envs, ψ′, it.state.operator, ψ′)
         return ψ′, envs, it.state.ϵ
     end
@@ -124,8 +128,7 @@ function Base.iterate(
     mps, envs, C_old, E_new = localupdate_step!(it, state)
 
     # error criterion
-    C = mps.C[0]
-    ϵ = bond_error(C_old, C)
+    ϵ = bond_error(C_old, mps.C[0])
 
     # New energy
     ΔE = (E_new - state.energy) / 2
@@ -141,24 +144,28 @@ function localupdate_step!(
         it::IterativeSolver{<:IDMRG}, state
     )
     alg_eigsolve = updatetol(it.alg_eigsolve, state.iter, state.ϵ)
-    return _localupdate_sweep_idmrg!(state.mps, state.operator, state.envs, alg_eigsolve, it.alg_expscheme)
+    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maximum(map(left_virtualspace, state.mps)))
+    trscheme = updatetruncation(it.trscheme; iter = state.iter)
+    return _localupdate_sweep_idmrg!(state.mps, state.operator, state.envs, alg_eigsolve, trscheme, expscheme)
 end
 
 function localupdate_step!(
         it::IterativeSolver{<:IDMRG2}, state
     )
     alg_eigsolve = updatetol(it.alg_eigsolve, state.iter, state.ϵ)
-    return _localupdate_sweep_idmrg2!(state.mps, state.operator, state.envs, alg_eigsolve, it.trscheme, it.alg_svd, it.expscheme)
+    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maximum(map(left_virtualspace, state.mps)))
+    trscheme = updatetruncation(it.trscheme; iter = state.iter)
+    return _localupdate_sweep_idmrg2!(state.mps, state.operator, state.envs, alg_eigsolve, trscheme, it.alg_svd, expscheme)
 end
 
-function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, expscheme)
+function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, alg_trscheme, expscheme)
     local E
     C_old = ψ.C[0]
     # left to right sweep
     for pos in 1:length(ψ)
         h = AC_hamiltonian(pos, ψ, H, ψ, envs)
         _, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
-        ψ.AL[pos], ψ.C[pos] = left_orth!(ψ.AC[pos]; positive = true)
+        ψ.AL[pos], ψ.C[pos] = left_orth!(ψ.AC[pos]; trunc = alg_trscheme)
         ψ.AL[pos], ψ.C[pos], ψ.AC[pos + 1] = changebonds_left(ψ.AL[pos], ψ.C[pos], ψ.AC[pos + 1], expscheme)
         if pos == length(ψ) # AC needed in next sweep
             ψ.AC[pos] = _mul_tail(ψ.AL[pos], ψ.C[pos])
@@ -171,7 +178,7 @@ function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, expscheme)
         h = AC_hamiltonian(pos, ψ, H, ψ, envs)
         E, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
 
-        C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); positive = true)
+        C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = alg_trscheme)
         ψ.C[pos - 1], ψ.AC[pos - 1], temp = changebonds_right(C, ψ.AC[pos - 1], temp, expscheme)
         ψ.AR[pos] = _transpose_front(temp)
         if pos == 1 # AC needed in next sweep
@@ -207,8 +214,8 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     # update the edge
     ψ.AL[end] = ψ.AC[end] / ψ.C[end]
     ψ.AC[1] = _mul_tail(ψ.AL[1], ψ.C[1])
-    ac2 = AC2(ψ, 0; kind = :ALAC)
-    h_ac2 = AC2_hamiltonian(0, ψ, H, ψ, envs)
+    ac2 = AC2(ψ, length(ψ); kind = :ALAC)
+    h_ac2 = AC2_hamiltonian(length(ψ), ψ, H, ψ, envs)
     _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
     al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
@@ -217,11 +224,11 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
 
     ψ.AL[end] = al
     ψ.C[end] = complex(c)
-    ψ.AR[1] = _transpose_front(ar)
+    ψ.AR[end+1] = _transpose_front(ar)
 
     ψ.AC[end] = _mul_tail(al, c)
-    ψ.AC[1] = _transpose_front(c * ar)
-    ψ.AL[1] = ψ.AC[1] / ψ.C[1]
+    ψ.AC[end+1] = _transpose_front(c * ar)
+    ψ.AL[end+1] = ψ.AC[end+1] / ψ.C[end+1]
 
     C_old = complex(c)
 
@@ -250,8 +257,8 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     end
 
     # update the edge
-    ψ.AC[end] = _mul_front(ψ.C[end - 1], ψ.AR[end])
-    ψ.AR[1] = _transpose_front(ψ.C[end] \ _transpose_tail(ψ.AC[1]))
+    ψ.AC[0] = _mul_front(ψ.C[- 1], ψ.AR[0])
+    ψ.AR[1] = _transpose_front(ψ.C[0] \ _transpose_tail(ψ.AC[1]))
     ac2 = AC2(ψ, 0; kind = :ACAR)
     h_ac2 = AC2_hamiltonian(0, ψ, H, ψ, envs)
     E, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
@@ -259,11 +266,11 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     al, c, ar = changebonds(al, c, ar, expscheme)
     normalize!(c)
 
-    ψ.AL[end] = al
-    ψ.C[end] = complex(c)
+    ψ.AL[0] = al
+    ψ.C[0] = complex(c)
     ψ.AR[1] = _transpose_front(ar)
 
-    ψ.AR[end] = _transpose_front(ψ.C[end - 1] \ _transpose_tail(al * c))
+    ψ.AR[0] = _transpose_front(ψ.C[-1] \ _transpose_tail(al * c))
     ψ.AC[1] = _transpose_front(c * ar)
 
     transfer_leftenv!(envs, ψ, H, ψ, 1)

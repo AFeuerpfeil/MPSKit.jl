@@ -22,7 +22,8 @@ struct DMRG{A, F} <: Algorithm
     "algorithm used for the eigenvalue solvers"
     alg_eigsolve::A
 
-    expscheme::Algorithm
+    trscheme::TruncationStrategy
+    expscheme::TruncationStrategy
 
     "callback function applied after each iteration, of signature `finalize(iter, ψ, H, envs) -> ψ, envs`"
     finalize::F
@@ -30,11 +31,11 @@ end
 function DMRG(;
         tol = Defaults.tol, maxiter = Defaults.maxiter, alg_eigsolve = (;),
         verbosity = Defaults.verbosity, finalize = Defaults._finalize,
-        miniter = 0, expscheme = NoExpand()
+        miniter = 0, trscheme = notrunc(), expscheme = noexpand()
     )
     alg_eigsolve′ = alg_eigsolve isa NamedTuple ? Defaults.alg_eigsolve(; alg_eigsolve...) :
         alg_eigsolve
-    return DMRG(tol, maxiter, miniter, verbosity, alg_eigsolve′, expscheme, finalize)
+    return DMRG(tol, maxiter, miniter, verbosity, alg_eigsolve′, trscheme, expscheme, finalize)
 end
 
 function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG, envs = environments(ψ, H))
@@ -46,6 +47,8 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG, envs = environm
         @infov 2 loginit!(log, ϵ, expectation_value(ψ, H, envs))
         for iter in 1:(alg.maxiter)
             alg_eigsolve = updatetol(alg.alg_eigsolve, iter, ϵ)
+            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maximum(map(left_virtualspace, ψ)))
+            trscheme = updatetruncation(alg.trscheme; iter = iter)
 
             zerovector!(ϵs)
             dir = 1
@@ -57,12 +60,12 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG, envs = environm
                 if alg.expscheme isa NoExpand 
                     ψ.AC[pos] = vec 
                 elseif dir == 1
-                    AL, C = left_orth!(vec; positive = true)
-                    AL, C, ψ.AC[pos + 1] = changebonds_left(AL, C, ψ.AC[pos + 1], alg.expscheme)
+                    AL, C = left_orth!(vec; trunc = trscheme)
+                    AL, C, ψ.AC[pos + 1] = changebonds_left(AL, C, ψ.AC[pos + 1], expscheme)
                     ψ.AC[pos] = (AL, C)
                 elseif dir == -1 
-                    C, temp = right_orth!(_transpose_tail(ψ.AC[pos]; copy = true); positive = true)
-                    C, ψ.AC[pos - 1], temp = changebonds_right(C, ψ.AC[pos - 1], temp, alg.expscheme)
+                    C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = trscheme)
+                    C, ψ.AC[pos - 1], temp = changebonds_right(C, ψ.AC[pos - 1], temp, expscheme)
                     ψ.AC[pos] = (C, _transpose_front(temp))
                 end
             end
@@ -113,8 +116,7 @@ struct DMRG2{A, S, F} <: Algorithm
 
     "algorithm used for [truncation](@extref MatrixAlgebraKit.TruncationStrategy) of the two-site update"
     trscheme::TruncationStrategy
-
-    expscheme::Algorithm
+    expscheme::TruncationStrategy
 
     "callback function applied after each iteration, of signature `finalize(iter, ψ, H, envs) -> ψ, envs`"
     finalize::F
@@ -122,8 +124,8 @@ end
 # TODO: find better default truncation
 function DMRG2(;
         tol = Defaults.tol, maxiter = Defaults.maxiter, verbosity = Defaults.verbosity,
-        miniter = 0, alg_eigsolve = (;), alg_svd = Defaults.alg_svd(), trscheme,
-        expscheme = NoExpand(), finalize = Defaults._finalize
+        miniter = 0, alg_eigsolve = (;), alg_svd = Defaults.alg_svd(), trscheme = notrunc(),
+        expscheme = noexpand(), finalize = Defaults._finalize
     )
     alg_eigsolve′ = alg_eigsolve isa NamedTuple ? Defaults.alg_eigsolve(; alg_eigsolve...) :
         alg_eigsolve
@@ -138,6 +140,8 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
     LoggingExtras.withlevel(; alg.verbosity) do
         for iter in 1:(alg.maxiter)
             alg_eigsolve = updatetol(alg.alg_eigsolve, iter, ϵ)
+            trscheme = updatetruncation(alg.trscheme; iter=iter)
+            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maximum(map(left_virtualspace, ψ)))
             zerovector!(ϵs)
 
             # left to right sweep
@@ -146,8 +150,8 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs)
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
-                al, c, ar = svd_trunc!(newA2center; trunc = alg.trscheme, alg = alg.alg_svd)
-                al, c = changebonds_left(al, c, alg.expscheme)
+                al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
+                al, c = changebonds_left(al, c, expscheme)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))
@@ -162,8 +166,8 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs)
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
-                al, c, ar = svd_trunc!(newA2center; trunc = alg.trscheme, alg = alg.alg_svd)
-                c, ar = changebonds_right(c, ar, alg.expscheme)
+                al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
+                c, ar = changebonds_right(c, ar, expscheme)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))

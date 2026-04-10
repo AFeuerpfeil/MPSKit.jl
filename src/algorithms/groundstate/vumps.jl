@@ -33,6 +33,8 @@ $(TYPEDFIELDS)
 
     "callback function applied after each iteration, of signature `finalize(iter, ψ, H, envs) -> ψ, envs`"
     finalize::F = Defaults._finalize
+
+    parallel::Bool = false
 end
 
 # Internal state of the VUMPS algorithm
@@ -118,7 +120,7 @@ function localupdate_step!(
     tforeach(eachsite(mps), src_ACs, src_Cs; scheduler) do site, AC₀, C₀
         dst_ACs[site] = _localupdate_vumps_step!(
             site, mps, state.operator, state.envs, AC₀, C₀;
-            parallel = false, alg_orth, state.which, alg_eigsolve
+            parallel = it.parallel, alg_orth, state.which, alg_eigsolve
         )
         return nothing
     end
