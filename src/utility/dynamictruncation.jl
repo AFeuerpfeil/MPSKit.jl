@@ -31,8 +31,9 @@ $(TYPEDFIELDS)
 
 See also [`updatetruncation`](@ref).
 """
-struct DynamicTruncation{T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T4<:RealOrNothing,T5<:RealOrNothing,T6<:RealOrNothing,T7<:RealOrNothing} <: TruncationStrategy
+struct DynamicTruncation{F,T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T4<:RealOrNothing,T5<:RealOrNothing,T6<:RealOrNothing,T7<:RealOrNothing,T8} <: TruncationStrategy
     "parent algorithm"
+    f::F # Function of a TruncationStrategy, default just returns the input
     atol::T1
     atol_min::T1 
 
@@ -49,7 +50,10 @@ struct DynamicTruncation{T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T
 
     tol_factor::T6
     rank_factor::T7
+
+    space::T8
     function DynamicTruncation(;
+            f::F= Base.identity,
             atol=nothing,
             atol_min = isnothing(atol) ? nothing : zero(atol),
             rtol=nothing,
@@ -60,22 +64,32 @@ struct DynamicTruncation{T1<:RealOrNothing,T2<:RealOrNothing,T3<:RealOrNothing,T
             maxerror_min = isnothing(maxerror) ? nothing : zero(maxerror),
             filter=nothing,
             tol_factor=1.0,
-            rank_factor=1.0
-        )
+            rank_factor=!isnothing(maxrank) && !isnothing(maxrank_max) ? (maxrank_max/maxrank)^(1/10) : 1.0,
+            space = nothing,
+        ) where {F}
         @assert isnothing(tol_factor) || 1 >= tol_factor > 0 "tol_factor must be in (0, 1]"
         @assert isnothing(rank_factor) || rank_factor >= 0 "rank_factor must be positive"
-        T1 = typeof(atol); T2 = typeof(rtol); T3 = typeof(maxrank); T4 = typeof(maxerror); T5 = typeof(filter); T6 = typeof(tol_factor); T7 = typeof(rank_factor)
-        return new{T1,T2,T3,T4,T5,T6,T7}(atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor)
+        T1 = typeof(atol); T2 = typeof(rtol); T3 = typeof(maxrank); T4 = typeof(maxerror); T5 = typeof(filter); T6 = typeof(tol_factor); T7 = typeof(rank_factor); T8 = typeof(space)
+        return new{F,T1,T2,T3,T4,T5,T6,T7,T8}(f, atol, atol_min, rtol, rtol_min, maxrank, maxrank_max, maxerror, maxerror_min, filter, tol_factor, rank_factor, space)
     end
 end
 
-function _clamp(a::Nothing,b,c,factor)
+function _clamp(a::Nothing,b::Nothing,c::X, factor) where {X}
+    return a
+end
+function _clamp(a::Nothing,b::X,c::Nothing, factor) where {X}
+    return a
+end
+function _clamp(a::Nothing,b::Nothing,c::Nothing, factor)
+    return a
+end
+function _clamp(a::Nothing,b::X,c::Y,factor) where {X, Y}
     return a
 end
 function _clamp(a,b,c, factor)
     return clamp(a*factor,b,c)
 end
-function _clamp(a,::Nothing,c, factor)
+function _clamp(a,::Nothing,c::X, factor) where {X}
     return _clamp(a, a, c, factor)
 end
 function _clamp(a,b,::Nothing, factor)
@@ -104,12 +118,17 @@ function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank:
 
     new_maxrank = int_clamp(alg.maxrank, nothing, alg.maxrank_max, rank_factor)
     new_maxrank = isnothing(new_maxrank) ? nothing : max(0, new_maxrank - current_rank)
-    return MatrixAlgebraKit.TruncationStrategy(;
+
+    strategy = MatrixAlgebraKit.TruncationStrategy(;
         atol = new_atol,
         rtol = new_rtol,
         maxerror = new_maxerror,
         maxrank = new_maxrank,
     )
+    if !isnothing(alg.space)
+        strategy = strategy | TensorKit.truncspace(alg.space) # Guarantees we keep at least the specified space
+    end
+    return alg.f(strategy)
 end
 
 

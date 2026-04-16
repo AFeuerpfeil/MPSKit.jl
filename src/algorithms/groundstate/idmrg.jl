@@ -144,7 +144,7 @@ function localupdate_step!(
         it::IterativeSolver{<:IDMRG}, state
     )
     alg_eigsolve = updatetol(it.alg_eigsolve, state.iter, state.ϵ)
-    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maximum(map(left_virtualspace, state.mps)))
+    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maxlinkdim(state.mps))
     trscheme = updatetruncation(it.trscheme; iter = state.iter)
     return _localupdate_sweep_idmrg!(state.mps, state.operator, state.envs, alg_eigsolve, trscheme, expscheme)
 end
@@ -153,7 +153,7 @@ function localupdate_step!(
         it::IterativeSolver{<:IDMRG2}, state
     )
     alg_eigsolve = updatetol(it.alg_eigsolve, state.iter, state.ϵ)
-    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maximum(map(left_virtualspace, state.mps)))
+    expscheme = updatetruncation(it.expscheme; iter = state.iter, current_rank = maxlinkdim(state.mps))
     trscheme = updatetruncation(it.trscheme; iter = state.iter)
     return _localupdate_sweep_idmrg2!(state.mps, state.operator, state.envs, alg_eigsolve, trscheme, it.alg_svd, expscheme)
 end
@@ -166,7 +166,7 @@ function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, alg_trscheme, exps
         h = AC_hamiltonian(pos, ψ, H, ψ, envs)
         _, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
         ψ.AL[pos], ψ.C[pos] = left_orth!(ψ.AC[pos]; trunc = alg_trscheme)
-        ψ.AL[pos], ψ.C[pos], ψ.AC[pos + 1] = changebonds_left(ψ.AL[pos], ψ.C[pos], ψ.AC[pos + 1], expscheme)
+        ψ.AL[pos], (ψ.C[pos], ψ.AC[pos + 1], ψ.AL[pos + 1]) = changebonds_left(ψ.AL[pos], (ψ.C[pos], ψ.AC[pos + 1], ψ.AL[pos + 1]), expscheme)
         if pos == length(ψ) # AC needed in next sweep
             ψ.AC[pos] = _mul_tail(ψ.AL[pos], ψ.C[pos])
         end
@@ -179,7 +179,7 @@ function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, alg_trscheme, exps
         E, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
 
         C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = alg_trscheme)
-        ψ.C[pos - 1], ψ.AC[pos - 1], temp = changebonds_right(C, ψ.AC[pos - 1], temp, expscheme)
+        (ψ.C[pos - 1], ψ.AR[pos - 1], ψ.AC[pos - 1]), temp = changebonds_right((C, ψ.AR[pos - 1],ψ.AC[pos - 1]), temp, expscheme)
         ψ.AR[pos] = _transpose_front(temp)
         if pos == 1 # AC needed in next sweep
             ψ.AC[pos] = _mul_front(ψ.C[pos - 1], ψ.AR[pos])
@@ -199,7 +199,7 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
         _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
         al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-        al, c = changebonds_left(al, c, expscheme)
+        al, (c, ψ.AL[pos + 1]) = changebonds_left(al, (c, ψ.AL[pos + 1]), expscheme; ac2=ac2)
         normalize!(c)
 
         ψ.AL[pos] = al
@@ -219,7 +219,7 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
     al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-    al, c, ar = changebonds(al, c, ar, expscheme)
+    al, c, ar = changebonds(al, c, ar, expscheme; ac2=ac2)
     normalize!(c)
 
     ψ.AL[end] = al
@@ -243,7 +243,7 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
         _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
         al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-        c, ar = changebonds_right(c, ar, expscheme)
+        (c, ψ.AR[pos]), ar = changebonds_right((c, ψ.AR[pos]), ar, expscheme; ac2=ac2)
         normalize!(c)
 
         ψ.AL[pos] = al
@@ -263,7 +263,7 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     h_ac2 = AC2_hamiltonian(0, ψ, H, ψ, envs)
     E, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
     al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-    al, c, ar = changebonds(al, c, ar, expscheme)
+    al, c, ar = changebonds(al, c, ar, expscheme; ac2=ac2)
     normalize!(c)
 
     ψ.AL[0] = al

@@ -136,8 +136,8 @@ function changebonds!(ψ, alg::RandPerturbedExpand)
     # ψ.AC .= similar.(ψ.AL)
 
     # initial guess for gauge is embedded original C
-    C₀ = similar(ψ.C[0], right_virtualspace(ψ.AL[end]) ← left_virtualspace(ψ.AL[1]))
-    absorb!(id!(C₀), ψ.C[0])
+    C₀ = similar(ψ.C[end], right_virtualspace(ψ.AL[end]) ← left_virtualspace(ψ.AL[end+1]))
+    absorb!(id!(C₀), ψ.C[end])
 
     gaugefix!(ψ, ψ.AL, C₀; order = :R, alg.alg_gauge.maxiter, alg.alg_gauge.tol)
 
@@ -164,8 +164,8 @@ function changebonds!(ψ, alg::RandPerturbedExpand)
     ψ.AC .= similar.(ψ.AR)
 
     # initial guess for gauge is embedded original C
-    C₀ = similar(ψ.C[0], right_virtualspace(ψ.AR[end]) ← left_virtualspace(ψ.AR[1]))
-    absorb!(id!(C₀), ψ.C[0])
+    C₀ = similar(ψ.C[end], right_virtualspace(ψ.AR[end]) ← left_virtualspace(ψ.AR[end+1]))
+    absorb!(id!(C₀), ψ.C[end])
 
     gaugefix!(ψ, ψ.AR, C₀; order = :LR, alg.alg_gauge.maxiter, alg.alg_gauge.tol)
     mul!.(ψ.AC, ψ.AL, ψ.C)
@@ -174,3 +174,9 @@ function changebonds!(ψ, alg::RandPerturbedExpand)
 end
 
 changebonds(ψ, alg::RandPerturbedExpand) = changebonds!(copy(ψ), alg)
+
+function changebonds(ψ, H, alg::RandPerturbedExpand, envs = environments(ψ, H))
+    ψ = changebonds!(copy(ψ), alg)
+    envs = recalculate!(envs, ψ, H)
+    return ψ, envs
+end

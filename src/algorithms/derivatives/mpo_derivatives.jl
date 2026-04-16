@@ -22,21 +22,21 @@ MPO_AC2_Hamiltonian(GL, O1, O2, GR) = MPODerivativeOperator(GL, (O1, O2), GR)
 
 # Constructors
 # ------------
-function C_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true)
+function C_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator())
     H_C = MPO_C_Hamiltonian(leftenv(envs, site + 1, below), rightenv(envs, site, below))
-    return prepare ? prepare_operator!!(H_C) : H_C
+    return prepare ? prepare_operator!!(H_C, backend, allocator) : H_C
 end
-function AC_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true)
+function AC_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator())
     O = isnothing(operator) ? nothing : operator[site]
     H_AC = MPO_AC_Hamiltonian(leftenv(envs, site, below), O, rightenv(envs, site, below))
-    return prepare ? prepare_operator!!(H_AC) : H_AC
+    return prepare ? prepare_operator!!(H_AC, backend, allocator) : H_AC
 end
-function AC2_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true)
+function AC2_hamiltonian(site::Int, below, operator, above, envs; prepare::Bool = true, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator())
     O1, O2 = isnothing(operator) ? (nothing, nothing) : (operator[site], operator[site + 1])
     H_AC2 = MPO_AC2_Hamiltonian(
         leftenv(envs, site, below), O1, O2, rightenv(envs, site + 1, below)
     )
-    return prepare ? prepare_operator!!(H_AC2) : H_AC2
+    return prepare ? prepare_operator!!(H_AC2, backend, allocator) : H_AC2
 end
 
 # Properties

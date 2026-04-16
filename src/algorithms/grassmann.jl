@@ -12,7 +12,7 @@ module GrassmannMPS
 
 using ..MPSKit
 using ..MPSKit: AbstractMPSEnvironments, InfiniteEnvironments, MultilineEnvironments,
-    AC_projection, recalculate!
+    AC_projection, recalculate!, FiniteChainStyle, InfiniteChainStyle, HamiltonianStyle, MPOStyle, OperatorStyle, GeometryStyle, gaugefix!
 using TensorKit
 using OhMyThreads
 import TensorKitManifolds.Grassmann
@@ -92,7 +92,10 @@ end
 
 Retract a state a distance `α` along a direction `g`, obtaining a new state and the local tangent vector. 
 """
-function retract(state::FiniteMPS, g, α::Real)
+function retract(state, g, α::Real)
+    return retract(GeometryStyle(state), state, g, α)
+end
+function retract(::FiniteChainStyle, state, g, α::Real)
     state′ = copy(state)
     h = map(eachindex(state)) do i
         AL′, ξ = Grassmann.retract(state.AL[i], g[i], α)
@@ -102,14 +105,14 @@ function retract(state::FiniteMPS, g, α::Real)
     normalize!(state′)
     return state′, h
 end
-function retract(state::InfiniteMPS, g, α::Real)
+function retract(::InfiniteChainStyle, state, g, α::Real)
     AL′ = similar(state.AL)
     g′ = similar(g)
     tforeach(eachindex(state); scheduler = MPSKit.Defaults.scheduler[]) do i
         AL′[i], g′[i] = Grassmann.retract(state.AL[i], g[i], α)
         return nothing
     end
-    state′ = InfiniteMPS(AL′, state.C[end])
+    state′ = gaugefix!(copy(state), AL′)
     return state′, g′
 end
 function retract(state::MultilineMPS, g, α::Real)
@@ -141,10 +144,10 @@ end
 
 Compute the cost function and the tangent vector with respect to the `AL` parameters of the state.
 """
-function fg(
-        state::FiniteMPS, operator::Union{O, LazySum{O}},
-        envs::AbstractMPSEnvironments = environments(state, operator)
-    ) where {O <: FiniteMPOHamiltonian}
+function fg(state, operator, envs = environments(state, operator))
+    return fg(GeometryStyle(state, operator), OperatorStyle(operator), state, operator, envs)
+end
+function fg(::FiniteChainStyle, ::HamiltonianStyle, state, operator, envs = environments(state, operator))
     f = expectation_value(state, operator, envs)
     isapprox(imag(f), 0; atol = eps(abs(f))^(3 / 4)) || @warn "MPO might not be Hermitian: $f"
     gs = map(1:length(state)) do i
@@ -154,10 +157,7 @@ function fg(
     end
     return real(f), gs
 end
-function fg(
-        state::InfiniteMPS, operator::Union{O, LazySum{O}},
-        envs::AbstractMPSEnvironments = environments(state, operator)
-    ) where {O <: InfiniteMPOHamiltonian}
+function fg(::InfiniteChainStyle, ::HamiltonianStyle, state, operator, envs = environments(state, operator))
     recalculate!(envs, state, operator, state)
     f = expectation_value(state, operator, envs)
     isapprox(imag(f), 0; atol = eps(abs(f))^(3 / 4)) || @warn "MPO might not be Hermitian: $f"
@@ -171,10 +171,7 @@ function fg(
     end
     return real(f), gs
 end
-function fg(
-        state::InfiniteMPS, operator::Union{O, LazySum{O}},
-        envs::AbstractMPSEnvironments = environments(state, operator)
-    ) where {O <: InfiniteMPO}
+function fg(::InfiniteChainStyle, ::MPOStyle, state, operator, envs = environments(state, operator))
     recalculate!(envs, state, operator, state)
     f = expectation_value(state, operator, envs)
     isapprox(imag(f), 0; atol = eps(abs(f))^(3 / 4)) || @warn "MPO might not be Hermitian: $f"

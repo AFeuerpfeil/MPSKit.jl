@@ -85,27 +85,32 @@ end
 function changebonds(ψ::MultilineMPS, alg::SvdCut)
     return Multiline(map(x -> changebonds(x, alg), ψ.data))
 end
-function changebonds(ψ::InfiniteMPS, alg::SvdCut)
-    copied = copy.(ψ.AL)
+function changebonds(ψ::AbstractMPS, alg::SvdCut)
+    return changebonds!(copy(ψ), alg)
+end
+function changebonds!(ψ::S, alg::SvdCut) where S <: AbstractMPS
     ncr = ψ.C[1]
 
     for i in 1:length(ψ)
         U, ncr, = svd_trunc(ψ.C[i]; trunc = alg.trscheme, alg = alg.alg_svd)
-        copied[i] = copied[i] * U
-        copied[i + 1] = _transpose_front(U' * _transpose_tail(copied[i + 1]))
+        ψ.AL[i] = ψ.AL[i] * U
+        ψ.AL[i + 1] = _transpose_front(U' * _transpose_tail(ψ.AL[i + 1]))
     end
 
     # make sure everything is full rank:
-    makefullrank!(copied)
+    makefullrank!(ψ.AL)
 
     # if the bond dimension is not changed, we can keep the same center, otherwise recompute
-    ψ = if space(ncr, 1) != space(copied[1], 1)
-        InfiniteMPS(copied)
-    else
-        C₀ = ncr isa TensorMap ? ncr : TensorMap(ncr)
-        InfiniteMPS(copied, C₀)
-    end
-    return normalize!(ψ)
+    # initial guess for gauge is embedded original C
+    C₀ = similar(ψ.C[end], right_virtualspace(ψ.AL[end]) ← left_virtualspace(ψ.AL[end+1]))
+    absorb!(id!(C₀), ψ.C[end])
+    psi = S.name.wrapper(ψ.AL, C₀)
+    return normalize!(psi)
+    # return typeof(S).
+    # ψ.AR .= similar.(ψ.AL)
+    # ψ.C = similar(ψ.AR, typeof(C₀))
+    # gaugefix!(ψ, ψ.AL, C₀)
+    # return normalize!(ψ)
 end
 
 function changebonds(ψ, H, alg::SvdCut, envs = environments(ψ, H))

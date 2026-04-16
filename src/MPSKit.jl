@@ -7,6 +7,7 @@ export PeriodicArray, PeriodicVector, PeriodicMatrix
 export WindowArray
 export left_virtualspace, right_virtualspace, physicalspace
 export braille
+export DynamicTruncation
 
 # states:
 export FiniteMPS

@@ -251,3 +251,9 @@ eachsite(ψ::AbstractMPS) = eachindex(ψ)
 
 TensorKit.leftunit(ψ::AbstractMPS) = leftunit(first(sectors(left_virtualspace(ψ, 1))))
 TensorKit.rightunit(ψ::AbstractMPS) = rightunit(first(sectors(right_virtualspace(ψ, 1))))
+
+function maxlinkdim(ψ::AbstractMPS)
+    D = maximum(dim.(left_virtualspace(ψ)))
+    D′ = maximum(dim.(right_virtualspace(ψ)))
+    return max(D, D′)
+end

@@ -12,7 +12,7 @@ Algorithm for bringing an `InfiniteMPS` into the left-canonical form.
 
 $(TYPEDFIELDS)
 """
-@kwdef struct LeftCanonical <: Algorithm
+@kwdef struct LeftCanonical{B <: DefaultBackend, A} <: Algorithm
     "tolerance for convergence criterium"
     tol::Float64 = Defaults.tolgauge
     "maximal amount of iterations"
@@ -26,6 +26,9 @@ $(TYPEDFIELDS)
     alg_eigsolve = _GAUGE_ALG_EIGSOLVE
     "minimal amount of iterations before using the eigensolver steps"
     eig_miniter::Int = 10
+
+    backend::B = DefaultBackend()
+    allocator::A = BufferAllocator()
 end
 
 """
@@ -37,7 +40,7 @@ Algorithm for bringing an `InfiniteMPS` into the right-canonical form.
 
 $(TYPEDFIELDS)
 """
-@kwdef struct RightCanonical <: Algorithm
+@kwdef struct RightCanonical{B <: DefaultBackend, A} <: Algorithm
     "tolerance for convergence criterium"
     tol::Float64 = Defaults.tolgauge
     "maximal amount of iterations"
@@ -51,6 +54,9 @@ $(TYPEDFIELDS)
     alg_eigsolve = _GAUGE_ALG_EIGSOLVE
     "minimal amount of iterations before using the eigensolver steps"
     eig_miniter::Int = 10
+
+    backend::B = DefaultBackend()
+    allocator::A = BufferAllocator()
 end
 
 """
@@ -75,7 +81,8 @@ function MixedCanonical(;
         tol::Real = Defaults.tolgauge, maxiter::Int = Defaults.maxiter,
         verbosity::Int = VERBOSE_WARN, alg_orth = Defaults.alg_qr(),
         alg_eigsolve = _GAUGE_ALG_EIGSOLVE,
-        eig_miniter::Int = 10, order::Symbol = :LR
+        eig_miniter::Int = 10, order::Symbol = :LR,
+        backend::DefaultBackend = DefaultBackend(), allocator = BufferAllocator()
     )
     if alg_orth isa LAPACK_HouseholderQR
         alg_leftorth = alg_orth
@@ -94,10 +101,10 @@ function MixedCanonical(;
     end
 
     left = LeftCanonical(;
-        tol, maxiter, verbosity, alg_orth = alg_leftorth, alg_eigsolve, eig_miniter
+        tol, maxiter, verbosity, alg_orth = alg_leftorth, alg_eigsolve, eig_miniter, backend, allocator
     )
     right = RightCanonical(;
-        tol, maxiter = maxiter, verbosity, alg_orth = alg_rightorth, alg_eigsolve, eig_miniter
+        tol, maxiter = maxiter, verbosity, alg_orth = alg_rightorth, alg_eigsolve, eig_miniter, backend, allocator
     )
 
     return MixedCanonical(left, right, order)
@@ -230,7 +237,7 @@ function uniform_leftorth!((AL, C), A, C₀, alg::LeftCanonical)
     end
 end
 
-function Base.iterate(it::IterativeSolver{LeftCanonical}, state = it.state)
+function Base.iterate(it::IterativeSolver{<:LeftCanonical}, state = it.state)
     C₀ = gauge_eigsolve_step!(it, state)
     C₁ = gauge_orth_step!(it, state)
     ϵ = oftype(state.ϵ, norm(C₀ - C₁))
@@ -241,17 +248,17 @@ function Base.iterate(it::IterativeSolver{LeftCanonical}, state = it.state)
     return (it.state.AL, it.state.C), it.state
 end
 
-function gauge_eigsolve_step!(it::IterativeSolver{LeftCanonical}, state)
+function gauge_eigsolve_step!(it::IterativeSolver{<:LeftCanonical}, state)
     (; AL, C, A, iter, ϵ) = state
     if iter ≥ it.eig_miniter
         alg_eigsolve = updatetol(it.alg_eigsolve, 1, ϵ^2)
-        _, vec = fixedpoint(flip(TransferMatrix(A, AL)), C[end], :LM, alg_eigsolve)
-        _, C[end] = left_orth!(vec; alg = it.alg_orth)
+        _, vec = fixedpoint(flip(TransferMatrix(A, AL, it.backend, it.allocator)), C[0], :LM, alg_eigsolve)
+        _, C[0] = left_orth!(vec; alg = it.alg_orth)
     end
     return C[end]
 end
 
-function gauge_orth_step!(it::IterativeSolver{LeftCanonical}, state)
+function gauge_orth_step!(it::IterativeSolver{<:LeftCanonical}, state)
     (; AL, C, A_tail, CA_tail) = state
     for i in 1:length(AL)
         # repartition!(A_tail[i], AL[i])
@@ -288,7 +295,7 @@ function uniform_rightorth!((AR, C), A, C₀, alg::RightCanonical)
     end
 end
 
-function Base.iterate(it::IterativeSolver{RightCanonical}, state = it.state)
+function Base.iterate(it::IterativeSolver{<:RightCanonical}, state = it.state)
     C₀ = gauge_eigsolve_step!(it, state)
     C₁ = gauge_orth_step!(it, state)
     ϵ = oftype(state.ϵ, norm(C₀ - C₁))
@@ -299,17 +306,17 @@ function Base.iterate(it::IterativeSolver{RightCanonical}, state = it.state)
     return (it.state.AR, it.state.C), it.state
 end
 
-function gauge_eigsolve_step!(it::IterativeSolver{RightCanonical}, state)
+function gauge_eigsolve_step!(it::IterativeSolver{<:RightCanonical}, state)
     (; AR, C, A, iter, ϵ) = state
     if iter ≥ it.eig_miniter
         alg_eigsolve = updatetol(it.alg_eigsolve, 1, ϵ^2)
-        _, vec = fixedpoint(TransferMatrix(A, AR), C[end], :LM, alg_eigsolve)
+        _, vec = fixedpoint(TransferMatrix(A, AR, it.backend, it.allocator), C[end], :LM, alg_eigsolve)
         C[end], _ = right_orth!(vec; alg = it.alg_orth)
     end
     return C[end]
 end
 
-function gauge_orth_step!(it::IterativeSolver{RightCanonical}, state)
+function gauge_orth_step!(it::IterativeSolver{<:RightCanonical}, state)
     (; A, AR, C, AC_tail) = state
     for i in length(AR):-1:1
         AC = mul!(AR[i], A[i], C[i])   # use AR as temporary storage for A * C

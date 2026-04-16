@@ -47,7 +47,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG, envs = environm
         @infov 2 loginit!(log, ϵ, expectation_value(ψ, H, envs))
         for iter in 1:(alg.maxiter)
             alg_eigsolve = updatetol(alg.alg_eigsolve, iter, ϵ)
-            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maximum(map(left_virtualspace, ψ)))
+            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maxlinkdim(ψ))
             trscheme = updatetruncation(alg.trscheme; iter = iter)
 
             zerovector!(ϵs)
@@ -61,11 +61,11 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG, envs = environm
                     ψ.AC[pos] = vec 
                 elseif dir == 1
                     AL, C = left_orth!(vec; trunc = trscheme)
-                    AL, C, ψ.AC[pos + 1] = changebonds_left(AL, C, ψ.AC[pos + 1], expscheme)
+                    AL, (C, ψ.AC[pos + 1]) = changebonds_left(AL, (C, ψ.AC[pos + 1]), expscheme)
                     ψ.AC[pos] = (AL, C)
                 elseif dir == -1 
                     C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = trscheme)
-                    C, ψ.AC[pos - 1], temp = changebonds_right(C, ψ.AC[pos - 1], temp, expscheme)
+                    (C, ψ.AC[pos - 1]), temp = changebonds_right((C, ψ.AC[pos - 1]), temp, expscheme)
                     ψ.AC[pos] = (C, _transpose_front(temp))
                 end
             end
@@ -141,7 +141,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
         for iter in 1:(alg.maxiter)
             alg_eigsolve = updatetol(alg.alg_eigsolve, iter, ϵ)
             trscheme = updatetruncation(alg.trscheme; iter=iter)
-            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maximum(map(left_virtualspace, ψ)))
+            expscheme = updatetruncation(alg.expscheme; iter = iter, current_rank = maxlinkdim(ψ))
             zerovector!(ϵs)
 
             # left to right sweep
@@ -151,7 +151,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
-                al, c = changebonds_left(al, c, expscheme)
+                al, (c,) = changebonds_left(al, (c, ), expscheme; ac2 = ac2)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))
@@ -167,7 +167,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
-                c, ar = changebonds_right(c, ar, expscheme)
+                (c,), ar = changebonds_right((c,), ar, expscheme; ac2 = ac2)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))

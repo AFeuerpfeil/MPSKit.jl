@@ -1,52 +1,87 @@
 struct NoExpand <: Algorithm end
 
-function changebonds_left(AL, C, alg::RandPerturbedExpand)
-    AL = _expand_leftisometry(AL, alg)
-    C′ = _embed_left_space(AL, C, alg)
-    return AL, C′
+function changebonds_left(AL, Cs, alg; kwargs...)
+    AL, Cs = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
+    return Cs, AL
 end
-function changebonds_left(AL, C1, C2, alg::RandPerturbedExpand)
-    AL = _expand_leftisometry(AL, alg)
-    C1′ = _embed_left_space(AL, C1, alg)
-    C2′ = _embed_left_space(AL, C2, alg)
-    return AL, C1′, C2′
+function changebonds_right(Cs, AR, alg; kwargs...)
+    Cs, AR = changebonds(; expand_leftspace = AR, embed_rightspace = Cs, alg, kwargs...)[[1,4]]
+    return Cs, AR
 end
-function changebonds_right(C, AR, alg::RandPerturbedExpand)
-    AR = _expand_rightisometry(AR, alg)
-    C′ = _embed_right_space(C, AR, alg)
-    return C′, AR
-end
-function changebonds_right(C1, C2, AR, alg::RandPerturbedExpand)
-    AR = _expand_rightisometry(AR, alg)
-    C1′ = _embed_right_space(C1, AR, alg)
-    C2′ = _embed_right_space(C2, AR, alg)
-    return C1′, C2′, AR
+function changebonds(al,c,ar; kwargs...)
+    _, al, c, ar, _ = changebonds(; expand_rightspace = al, expand_leftspace = ar, embed_both = (c,), alg, kwargs...)
+    return al, only(c), ar
 end
 
-function changebonds(AL, C, AR, alg::RandPerturbedExpand)
-    AL = _expand_leftisometry(AL, alg)
-    C = _embed_left_space(AL, C, alg)
-    AR = _expand_rightisometry(AR, alg)
-    C = _embed_right_space(C, AR, alg)
-    return AL, C, AR
+function changebonds(;
+        embed_rightspace = missing,
+        expand_rightspace = missing,
+        expand_leftspace = missing,
+        embed_leftspace = missing,
+        embed_both = missing,
+        alg,
+        ac2 = missing,
+        expansion_leftspace = ismissing(ac2) ? missing : sup_inf_space(ac2),
+        expansion_rightspace = ismissing(expansion_leftspace) ? (ismissing(ac2) ? missing : sup_inf_space(ac2)) : expansion_leftspace,
+    )
+    return changebonds(
+        embed_rightspace, expand_rightspace,embed_both, expand_leftspace, embed_leftspace, alg;
+        expansion_leftspace, expansion_rightspace
+    )
+end
+const MissingOrTuple = Union{Missing, Tuple{<:Any}}
+function changebonds(
+        embed_rightspace::MissingOrTuple, expand_rightspace, embed_both::MissingOrTuple, expand_leftspace, embed_leftspace::MissingOrTuple, alg;
+        expansion_leftspace, expansion_rightspace
+    )
+    if !ismissing(expand_rightspace)
+        expand_rightspace = _expand_leftisometry(expand_rightspace, alg, expansion_leftspace)
+        if !ismissing(embed_rightspace)
+            embed_rightspace = (_embed_left_space(expand_rightspace, A, alg) for A in embed_rightspace)
+        end
+        if !ismissing(embed_both)
+            embed_both = (_embed_left_space(expand_rightspace, A, alg) for A in embed_both)
+        end
+    end
+    if !ismissing(expand_leftspace)
+        expand_leftspace = _expand_rightisometry(expand_leftspace, alg, expansion_rightspace)
+        if !ismissing(embed_leftspace)
+            embed_leftspace = (_embed_right_space(A, expand_leftspace, alg) for A in embed_leftspace)
+        end
+        if !ismissing(embed_both)
+            embed_both = (_embed_right_space(A, expand_leftspace, alg) for A in embed_both)
+        end
+    end
+    return embed_rightspace, expand_rightspace, embed_both, expand_leftspace, embed_leftspace
 end
 
-function _expand_leftisometry(A::MPSTensor, alg)
+
+
+## Idea of two-site expansion after update: full space in middle is sup(Vl ⊗ p1, Vr ⊗ p2), the compact SVD space is inf(Vl ⊗ p1, Vr ⊗ p2), which consists of kept + truncated space (if one uses a truncated SVD).
+## Then, we want to only take samples in the sup ⊖ inf space (previosuly, I took sup - V_kept, which also added states, we just truncated!)
+function sup_inf_space(ac2)
+    VL = space(ac2, 1) ⊗ space(ac2, 2)
+    VR = space(ac2, 3) ⊗ space(ac2, 4)
+    return supremum(VL, VR) ⊖ infimum(VL, VR)
+end
+function _sample_space(space, sup, trscheme)
+    return sample_space(infimum(space, sup), trscheme)
+end
+function _expand_leftisometry(A::MPSTensor, alg, expansion_leftspace)
     VL = left_null(A)
-    V = sample_space(right_virtualspace(VL), alg.trscheme)
+    V = _sample_space(right_virtualspace(VL), expansion_leftspace, alg.trscheme)
     XL = randisometry(scalartype(VL), right_virtualspace(VL) ← V)
-    A = catdomain(A, VL * XL)
-    return A
+    return catdomain(A, VL * XL)
 end
-function _expand_rightisometry(A::MPSTensor, alg)
-    return _transpose_front(_expand_rightisometry(_transpose_tail(A; copy = true), alg))
+
+function _expand_rightisometry(A::MPSTensor, alg, expansion_rightspace)
+    return _transpose_front(_expand_rightisometry(_transpose_tail(A; copy = true), alg, expansion_rightspace))
 end
-function _expand_rightisometry(AR_tail::AbstractTensorMap, alg)
+function _expand_rightisometry(AR_tail::AbstractTensorMap, alg, expansion_rightspace)
     VR = right_null(AR_tail)
-    V = sample_space(space(VR, 1), alg.trscheme)
+    V = _sample_space(space(VR, 1), expansion_rightspace, alg.trscheme)
     XR = randisometry(scalartype(VR), space(VR, 1) ← V)
-    AR_tail = catcodomain(AR_tail, XR' * VR)
-    return AR_tail
+    return catcodomain(AR_tail, XR' * VR)
 end
 
 function _embed_left_space(A::MPSTensor, C::MPSBondTensor, alg)

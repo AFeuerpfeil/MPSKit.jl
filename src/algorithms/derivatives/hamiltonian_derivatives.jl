@@ -37,17 +37,17 @@ end
 
 function AC_hamiltonian(
         site::Int, below::_HAM_MPS_TYPES, operator::MPOHamiltonian, above::_HAM_MPS_TYPES, envs;
-        prepare::Bool = true
+        prepare::Bool = true, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator()
     )
     @assert below === above "JordanMPO assumptions break"
     GL = leftenv(envs, site, below)
     GR = rightenv(envs, site, below)
     W = operator[site]
-    H_AC = JordanMPO_AC_Hamiltonian(GL, W, GR)
-    return prepare ? prepare_operator!!(H_AC) : H_AC
+    H_AC = JordanMPO_AC_Hamiltonian(GL, W, GR, backend, allocator)
+    return prepare ? prepare_operator!!(H_AC, backend, allocator) : H_AC
 end
 
-function JordanMPO_AC_Hamiltonian(GL::MPSTensor, W::JordanMPOTensor, GR::MPSTensor)
+function JordanMPO_AC_Hamiltonian(GL::MPSTensor, W::JordanMPOTensor, GR::MPSTensor, backend::AbstractBackend, allocator)
     # onsite
     D = nonzero_length(W.D) > 0 ? only(W.D) : missing
 
@@ -60,7 +60,7 @@ function JordanMPO_AC_Hamiltonian(GL::MPSTensor, W::JordanMPOTensor, GR::MPSTens
     # starting
     C = if nonzero_length(W.C) > 0
         GR_2 = GR[2:(end - 1)]
-        @plansor starting[-1 -2; -3 -4] ≔ W.C[-1; -3 1] * GR_2[-4 1; -2]
+        @plansor backend = backend allocator = allocator starting[-1 -2; -3 -4] ≔ W.C[-1; -3 1] * GR_2[-4 1; -2]
         only(starting)
     else
         missing
@@ -69,7 +69,7 @@ function JordanMPO_AC_Hamiltonian(GL::MPSTensor, W::JordanMPOTensor, GR::MPSTens
     # ending
     B = if nonzero_length(W.B) > 0
         GL_2 = GL[2:(end - 1)]
-        @plansor ending[-1 -2; -3 -4] ≔ GL_2[-1 1; -3] * W.B[1 -2; -4]
+        @plansor backend = backend allocator = allocator ending[-1 -2; -3 -4] ≔ GL_2[-1 1; -3] * W.B[1 -2; -4]
         only(ending)
     else
         missing
@@ -103,11 +103,11 @@ function prepare_operator!!(
         missing
     elseif !ismissing(C)
         Id = TensorKit.id(storagetype(C), space(C, 2))
-        @plansor C[-1 -2; -3 -4] += H.D[-1; -3] * Id[-2; -4]
+        @plansor backend = backend allocator = allocator C[-1 -2; -3 -4] += H.D[-1; -3] * Id[-2; -4]
         missing
     elseif !ismissing(B)
         Id = TensorKit.id(storagetype(B), space(B, 1))
-        @plansor B[-1 -2; -3 -4] += Id[-1; -3] * H.D[-2; -4]
+        @plansor backend = backend allocator = allocator B[-1 -2; -3 -4] += Id[-1; -3] * H.D[-2; -4]
         missing
     else
         H.D
@@ -118,7 +118,7 @@ function prepare_operator!!(
         missing
     elseif !ismissing(C)
         Id = id(storagetype(C), space(C, 1))
-        @plansor C[-1 -2; -3 -4] += Id[-1; -3] * H.I[-4; -2]
+        @plansor backend = backend allocator = allocator C[-1 -2; -3 -4] += Id[-1; -3] * H.I[-4; -2]
         missing
     else
         H.I
@@ -129,7 +129,7 @@ function prepare_operator!!(
         missing
     elseif !ismissing(B)
         Id = id(storagetype(B), space(B, 2))
-        @plansor B[-1 -2; -3 -4] += H.E[-1; -3] * Id[-2; -4]
+        @plansor backend = backend allocator = allocator B[-1 -2; -3 -4] += H.E[-1; -3] * Id[-2; -4]
         missing
     else
         H.E
@@ -185,17 +185,17 @@ end
 
 function AC2_hamiltonian(
         site::Int, below::_HAM_MPS_TYPES, operator::MPOHamiltonian, above::_HAM_MPS_TYPES, envs;
-        prepare::Bool = true
+        prepare::Bool = true, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator()
     )
     @assert below === above "JordanMPO assumptions break"
     GL = leftenv(envs, site, below)
     GR = rightenv(envs, site + 1, below)
     W1, W2 = operator[site], operator[site + 1]
-    H_AC2 = JordanMPO_AC2_Hamiltonian(GL, W1, W2, GR)
-    return prepare ? prepare_operator!!(H_AC2) : H_AC2
+    H_AC2 = JordanMPO_AC2_Hamiltonian(GL, W1, W2, GR, backend, allocator)
+    return prepare ? prepare_operator!!(H_AC2, backend, allocator) : H_AC2
 end
 
-function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::JordanMPOTensor, GR::MPSTensor)
+function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::JordanMPOTensor, GR::MPSTensor, backend::AbstractBackend=DefaultBackend(), allocator = BufferAllocator())
     # not started
     II = size(W2, 4) == 1 ? missing : transpose(removeunit(GR[1], 2))
 
@@ -204,7 +204,7 @@ function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::Jorda
 
     # starting right
     IC = if nonzero_length(W2.C) > 0
-        @plansor IC_[-1 -2; -3 -4] ≔ W2.C[-1; -3 1] * GR[2:(end - 1)][-4 1; -2]
+        @plansor backend = backend allocator = allocator IC_[-1 -2; -3 -4] ≔ W2.C[-1; -3 1] * GR[2:(end - 1)][-4 1; -2]
         only(IC_)
     else
         missing
@@ -218,7 +218,7 @@ function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::Jorda
 
     # starting left - ending right
     CB = if nonzero_length(W1.C) > 0 && nonzero_length(W2.B) > 0
-        @plansor CB_[-1 -2; -3 -4] ≔ W1.C[-1; -3 1] * W2.B[1 -2; -4]
+        @plansor backend = backend allocator = allocator CB_[-1 -2; -3 -4] ≔ W1.C[-1; -3 1] * W2.B[1 -2; -4]
         # have to convert to complex if hamiltonian is real but states are complex
         scalartype(GL) <: Complex ? complex(only(CB_)) : only(CB_)
     else
@@ -227,7 +227,7 @@ function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::Jorda
 
     # starting left - continuing right
     CA = if nonzero_length(W1.C) > 0 && nonzero_length(W2.A) > 0
-        @plansor CA_[-1 -2 -3; -4 -5 -6] ≔ W1.C[-1; -4 2] * W2.A[2 -2; -5 1] *
+        @plansor backend = backend allocator = allocator CA_[-1 -2 -3; -4 -5 -6] ≔ W1.C[-1; -4 2] * W2.A[2 -2; -5 1] *
             GR[2:(end - 1)][-6 1; -3]
         only(CA_)
     else
@@ -236,7 +236,7 @@ function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::Jorda
 
     # continuing left - ending right
     AB = if nonzero_length(W1.A) > 0 && nonzero_length(W2.B) > 0
-        @plansor AB_[-1 -2 -3; -4 -5 -6] ≔ GL[2:(end - 1)][-1 2; -4] * W1.A[2 -2; -5 1] *
+        @plansor backend = backend allocator = allocator AB_[-1 -2 -3; -4 -5 -6] ≔ GL[2:(end - 1)][-1 2; -4] * W1.A[2 -2; -5 1] *
             W2.B[1 -3; -6]
         only(AB_)
     else
@@ -245,7 +245,7 @@ function JordanMPO_AC2_Hamiltonian(GL::MPSTensor, W1::JordanMPOTensor, W2::Jorda
 
     # ending left
     BE = if nonzero_length(W1.B) > 0
-        @plansor BE_[-1 -2; -3 -4] ≔ GL[2:(end - 1)][-1 2; -3] * W1.B[2 -2; -4]
+        @plansor backend = backend allocator = allocator BE_[-1 -2; -3 -4] ≔ GL[2:(end - 1)][-1 2; -3] * W1.B[2 -2; -4]
         only(BE_)
     else
         missing
@@ -297,11 +297,11 @@ function prepare_operator!!(
 
     CB::Union{Missing, O2} = if !ismissing(CA) && !ismissing(H.CB)
         Id = TensorKit.id(storagetype(H.CB), space(CA, 3))
-        @plansor CA[-1 -2 -3; -4 -5 -6] += H.CB[-1 -2; -4 -5] * Id[-3; -6]
+        @plansor backend = backend allocator = allocator CA[-1 -2 -3; -4 -5 -6] += H.CB[-1 -2; -4 -5] * Id[-3; -6]
         missing
     elseif !ismissing(AB) && !ismissing(H.CB)
         Id = TensorKit.id(storagetype(H.CB), space(AB, 3))
-        @plansor CA[-1 -2 -3; -4 -5 -6] += H.CB[-2 -3; -5 -6] * Id[-1; -4]
+        @plansor backend = backend allocator = allocator CA[-1 -2 -3; -4 -5 -6] += H.CB[-2 -3; -5 -6] * Id[-1; -4]
         missing
     else
         H.CB
@@ -310,7 +310,7 @@ function prepare_operator!!(
     # starting right
     IC::Union{Missing, O2} = if !ismissing(CA) && !ismissing(H.IC)
         Id = TensorKit.id(storagetype(H.IC), space(CA, 1))
-        @plansor CA[-1 -2 -3; -4 -5 -6] += Id[-1; -4] * H.IC[ -2 -3; -5 -6]
+        @plansor backend = backend allocator = allocator CA[-1 -2 -3; -4 -5 -6] += Id[-1; -4] * H.IC[ -2 -3; -5 -6]
         missing
     else
         H.IC
@@ -319,7 +319,7 @@ function prepare_operator!!(
     # ending left
     BE::Union{Missing, O2} = if !ismissing(AB) && !ismissing(H.BE)
         Id = TensorKit.id(storagetype(H.BE), space(AB, 3))
-        @plansor AB[-1 -2 -3; -4 -5 -6] += H.BE[-1 -2; -4 -5] * Id[-3; -6]
+        @plansor backend = backend allocator = allocator AB[-1 -2 -3; -4 -5 -6] += H.BE[-1 -2; -4 -5] * Id[-3; -6]
         missing
     else
         H.BE
@@ -328,12 +328,12 @@ function prepare_operator!!(
     # onsite left
     DE::Union{Missing, O1} = if !ismissing(BE) && !ismissing(H.DE)
         Id = TensorKit.id(storagetype(H.DE), space(BE, 1))
-        @plansor BE[-1 -2; -3 -4] += Id[-1; -3] * H.DE[-2; -4]
+        @plansor backend = backend allocator = allocator BE[-1 -2; -3 -4] += Id[-1; -3] * H.DE[-2; -4]
         missing
     elseif !ismissing(AB) && !ismissing(H.DE)
         Id1 = id(storagetype(H.DE), space(AB, 1))
         Id2 = id(storagetype(H.DE), space(AB, 3))
-        @plansor AB[-1 -2 -3; -4 -5 -6] += Id1[-1; -4] * H.DE[-2; -5] * Id2[-3; -6]
+        @plansor backend = backend allocator = allocator AB[-1 -2 -3; -4 -5 -6] += Id1[-1; -4] * H.DE[-2; -5] * Id2[-3; -6]
         missing
         # TODO: could also try in CA?
     else
@@ -343,12 +343,12 @@ function prepare_operator!!(
     # onsite right
     ID::Union{Missing, O1} = if !ismissing(IC) && !ismissing(H.ID)
         Id = TensorKit.id(storagetype(H.ID), space(IC, 2))
-        @plansor IC[-1 -2; -3 -4] += H.ID[-1; -3] * Id[-2; -4]
+        @plansor backend = backend allocator = allocator IC[-1 -2; -3 -4] += H.ID[-1; -3] * Id[-2; -4]
         missing
     elseif !ismissing(CA) && !ismissing(H.ID)
         Id1 = TensorKit.id(storagetype(H.ID), space(CA, 1))
         Id2 = TensorKit.id(storagetype(H.ID), space(CA, 3))
-        @plansor CA[-1 -2 -3; -4 -5 -6] += Id1[-1; -4] * H.ID[-2; -5] * Id2[-3; -6]
+        @plansor backend = backend allocator = allocator CA[-1 -2 -3; -4 -5 -6] += Id1[-1; -4] * H.ID[-2; -5] * Id2[-3; -6]
         missing
     else
         H.ID
@@ -357,11 +357,11 @@ function prepare_operator!!(
     # finished
     II::Union{Missing, O1} = if !ismissing(IC) && !ismissing(H.II)
         I = id(storagetype(H.II), space(IC, 1))
-        @plansor IC[-1 -2; -3 -4] += I[-1; -3] * H.II[-2; -4]
+        @plansor backend = backend allocator = allocator IC[-1 -2; -3 -4] += I[-1; -3] * H.II[-2; -4]
         II = missing
     elseif !ismissing(CA) && !ismissing(H.II)
         I = id(storagetype(H.II), space(CA, 1) ⊗ space(CA, 2))
-        @plansor CA[-1 -2 -3; -4 -5 -6] += I[-1 -2; -4 -5] * H.II[-3; -6]
+        @plansor backend = backend allocator = allocator CA[-1 -2 -3; -4 -5 -6] += I[-1 -2; -4 -5] * H.II[-3; -6]
         II = missing
     else
         H.II
@@ -370,11 +370,11 @@ function prepare_operator!!(
     # unstarted
     EE::Union{Missing, O1} = if !ismissing(BE) && !ismissing(H.EE)
         I = id(storagetype(H.EE), space(BE, 2))
-        @plansor BE[-1 -2; -3 -4] += H.EE[-1; -3] * I[-2; -4]
+        @plansor backend = backend allocator = allocator BE[-1 -2; -3 -4] += H.EE[-1; -3] * I[-2; -4]
         EE = missing
     elseif !ismissing(AB) && !ismissing(H.EE)
         I = id(storagetype(H.EE), space(AB, 2) ⊗ space(AB, 3))
-        @plansor AB[-1 -2 -3; -4 -5 -6] += H.EE[-1; -4] * I[-2 -3; -5 -6]
+        @plansor backend = backend allocator = allocator AB[-1 -2 -3; -4 -5 -6] += H.EE[-1; -4] * I[-2 -3; -5 -6]
         EE = missing
     else
         H.EE

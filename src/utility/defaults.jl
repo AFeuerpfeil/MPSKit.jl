@@ -9,6 +9,7 @@ import KrylovKit: GMRES, Arnoldi, Lanczos
 using OhMyThreads
 using ..MPSKit: DynamicTol
 using TensorKit: TensorKit
+using TensorOperations: DefaultBackend, DefaultAllocator, BufferAllocator, AbstractBackend
 using MatrixAlgebraKit: LAPACK_HouseholderQR, LAPACK_HouseholderLQ, LAPACK_DivideAndConquer
 
 const VERBOSE_NONE = 0
@@ -41,9 +42,10 @@ const eigsolver = Arnoldi(; tol, maxiter, eager = true)
 function alg_gauge(;
         tol = tolgauge, maxiter = maxiter, verbosity = VERBOSE_WARN,
         dynamic_tols = dynamic_tols, tol_min = tol_min, tol_max = tol_max,
-        tol_factor = gauge_tolfactor
+        eig_miniter = 10,
+        tol_factor = gauge_tolfactor, backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator()
     )
-    alg = (; tol, maxiter, verbosity)
+    alg = (; tol, maxiter, verbosity, backend, allocator, eig_miniter)
     return dynamic_tols ? DynamicTol(alg, tol_min, tol_max, tol_factor) : alg
 end
 

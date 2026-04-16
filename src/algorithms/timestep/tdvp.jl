@@ -179,7 +179,7 @@ function timestep!(
         ac2′ = integrate(Hac2, ac2, t, dt / 2, alg.integrator; imaginary_evolution)
 
         nal, nc, nar = svd_trunc!(ac2′; trunc = alg.trscheme, alg = alg.alg_svd)
-        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme)
+        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme; ac2 = ac2)
         ψ.AC[i] = (nal, complex(nc))
         ψ.AC[i + 1] = (complex(nc), _transpose_front(nar))
 
@@ -199,7 +199,7 @@ function timestep!(
         ac2′ = integrate(Hac2, ac2, t + dt / 2, dt / 2, alg.integrator; imaginary_evolution)
 
         nal, nc, nar = svd_trunc!(ac2′; trunc = alg.trscheme, alg = alg.alg_svd)
-        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme)
+        nal, nc, nar = changebonds(nal, nc, nar, alg.expscheme; ac2 = ac2)
         ψ.AC[i - 1] = (nal, complex(nc))
         ψ.AC[i] = (complex(nc), _transpose_front(nar))
 
