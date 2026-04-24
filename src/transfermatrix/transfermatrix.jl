@@ -118,3 +118,9 @@ function regularize!(v::MPOTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
     λ = @plansor backend = backend allocator = allocator lvec[2; 1] * removeunit(removeunit(v, 3), 2)[1; 2]
     return add!(v, insertleftunit(insertrightunit(rvec, 1; dual = isdual(space(v, 2))), 3), -λ)
 end
+
+function prepare!!(v::SingleTransferMatrix{A, B}) where {A,B}
+    isnothing(B) || return v 
+    ## TODO: Deal with flipped case correctly!
+    #return PrecomputedCDerivative()...
+end

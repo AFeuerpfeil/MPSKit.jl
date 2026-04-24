@@ -1,8 +1,10 @@
 struct NoExpand <: Algorithm end
 
 function changebonds_left(AL, Cs, alg; kwargs...)
+    @info "Old size: $(dim(right_virtualspace(AL)))"
     AL, Cs = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
-    return Cs, AL
+    @info "New size: $(dim(right_virtualspace(AL)))"
+    return AL, Cs
 end
 function changebonds_right(Cs, AR, alg; kwargs...)
     Cs, AR = changebonds(; expand_leftspace = AR, embed_rightspace = Cs, alg, kwargs...)[[1,4]]
@@ -29,28 +31,34 @@ function changebonds(;
         expansion_leftspace, expansion_rightspace
     )
 end
-const MissingOrTuple = Union{Missing, Tuple{<:Any}}
+const MissingOrTuple = Union{Missing, <:Tuple}
 function changebonds(
         embed_rightspace::MissingOrTuple, expand_rightspace, embed_both::MissingOrTuple, expand_leftspace, embed_leftspace::MissingOrTuple, alg;
         expansion_leftspace, expansion_rightspace
     )
     if !ismissing(expand_rightspace)
-        expand_rightspace = _expand_leftisometry(expand_rightspace, alg, expansion_leftspace)
-        if !ismissing(embed_rightspace)
-            embed_rightspace = (_embed_left_space(expand_rightspace, A, alg) for A in embed_rightspace)
+        expand_rightspace_new = _expand_leftisometry(expand_rightspace, alg, expansion_leftspace)
+        if space(expand_rightspace) != space(expand_rightspace_new) || true
+            if !ismissing(embed_leftspace)
+                embed_leftspace = (_embed_left_space(expand_rightspace_new, A, alg) for A in embed_leftspace)
+            end
+            if !ismissing(embed_both)
+                embed_both = (_embed_left_space(expand_rightspace_new, A, alg) for A in embed_both)
+            end
         end
-        if !ismissing(embed_both)
-            embed_both = (_embed_left_space(expand_rightspace, A, alg) for A in embed_both)
-        end
+        expand_rightspace = expand_rightspace_new
     end
     if !ismissing(expand_leftspace)
-        expand_leftspace = _expand_rightisometry(expand_leftspace, alg, expansion_rightspace)
-        if !ismissing(embed_leftspace)
-            embed_leftspace = (_embed_right_space(A, expand_leftspace, alg) for A in embed_leftspace)
+        expand_leftspace_new = _expand_rightisometry(expand_leftspace, alg, expansion_rightspace)
+        if space(expand_leftspace) != space(expand_leftspace_new) || true
+            if !ismissing(embed_rightspace)
+                embed_rightspace = (_embed_right_space(A, expand_leftspace_new, alg) for A in embed_rightspace)
+            end
+            if !ismissing(embed_both)
+                embed_both = (_embed_right_space(A, expand_leftspace_new, alg) for A in embed_both)
+            end
         end
-        if !ismissing(embed_both)
-            embed_both = (_embed_right_space(A, expand_leftspace, alg) for A in embed_both)
-        end
+        expand_leftspace = expand_leftspace_new
     end
     return embed_rightspace, expand_rightspace, embed_both, expand_leftspace, embed_leftspace
 end
@@ -65,7 +73,8 @@ function sup_inf_space(ac2)
     return supremum(VL, VR) ⊖ infimum(VL, VR)
 end
 function _sample_space(space, sup, trscheme)
-    return sample_space(infimum(space, sup), trscheme)
+    sp = ismissing(sup) ? space : infimum(space, sup)
+    return sample_space(sp, trscheme)
 end
 function _expand_leftisometry(A::MPSTensor, alg, expansion_leftspace)
     VL = left_null(A)
@@ -108,4 +117,15 @@ function _embed_right_space(Anext::MPSTensor, A::AbstractTensorMap, alg)
     scale!(randn!(Anext′), alg.noisefactor)
     Anext′ = TensorKit.absorb!(Anext′, Anext)
     return Anext′
+end
+
+
+extract_sector_types(::Type{GradedSpace{S,D}}) where {S<:Sector,D} = (S,)
+extract_sector_types(::Type{GradedSpace{ProductSector{T},D}}) where {T<:Tuple,D} = Tuple(T.parameters)
+extract_sector_types(sp::GradedSpace) = extract_sector_types(typeof(sp))
+function generate_sampling_space(psi::MPSKit.AbstractMPS, cutoff::Integer=100)
+    sp = physicalspace(psi.AL[1])
+    x = extract_sector_types(sp)
+    iterator = Iterators.product((Iterators.take(values(T),cutoff) for T in x)...)
+    return typeof(sp)([T=>1 for T in iterator])
 end

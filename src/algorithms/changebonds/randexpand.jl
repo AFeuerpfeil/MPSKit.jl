@@ -81,10 +81,12 @@ are distributed uniformly, and then truncating according to the given `strategy`
 """
 function sample_space(V, strategy)
     S = TensorKit.SectorVector{Float64}(undef, V)
+    # fill!(S, 1.0)
     Random.rand!(parent(S))
     ind = MatrixAlgebraKit.findtruncated(S, strategy)
     return TensorKit.Factorizations.truncate_space(V, ind)
 end
+include("tensorkit.jl")
 
 
 

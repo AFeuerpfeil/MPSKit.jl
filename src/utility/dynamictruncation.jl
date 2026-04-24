@@ -6,6 +6,7 @@ import ..MPSKit: Algorithm
 using MatrixAlgebraKit
 import MatrixAlgebraKit: TruncationStrategy
 using DocStringExtensions
+using TensorKit: truncspace
 
 export updatetruncation, DynamicTruncation
 
@@ -14,7 +15,10 @@ export updatetruncation, DynamicTruncation
 
 Update the truncation tolerance of the algorithm `alg` based on the current iteration `iter` and the current error `ϵ`.
 """ updatetruncation
-updatetruncation(alg, args...) = alg
+function updatetruncation(alg, args...) 
+    println("This was called")
+    return alg
+end
 
 # Wrapper for dynamic tolerance adjustment
 # ----------------------------------------
@@ -109,6 +113,7 @@ Update the truncation tolerance of the algorithm `alg` based on the current iter
 where the new tolerance is given by
 """
 function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank::Integer = 0)
+        println("This 2nd version was called")
     iter = max(iter, one(iter))
     tol_factor = alg.tol_factor^iter 
     rank_factor = alg.rank_factor^iter
@@ -118,6 +123,9 @@ function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank:
 
     new_maxrank = int_clamp(alg.maxrank, nothing, alg.maxrank_max, rank_factor)
     new_maxrank = isnothing(new_maxrank) ? nothing : max(0, new_maxrank - current_rank)
+    if !iszero(current_rank)
+        @info "current rank: $current_rank, new maxrank: $new_maxrank"
+    end
 
     strategy = MatrixAlgebraKit.TruncationStrategy(;
         atol = new_atol,
@@ -126,8 +134,12 @@ function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank:
         maxrank = new_maxrank,
     )
     if !isnothing(alg.space)
-        strategy = strategy | TensorKit.truncspace(alg.space) # Guarantees we keep at least the specified space
+        strategy = (strategy | truncspace(alg.space)) # Guarantees we keep at least the specified space
+        if !isnothing(new_maxrank)
+            strategy = (strategy & truncrank(new_maxrank)) # Also apply the maxrank constraint after ensuring the space is kept
+        end
     end
+    
     return alg.f(strategy)
 end
 
