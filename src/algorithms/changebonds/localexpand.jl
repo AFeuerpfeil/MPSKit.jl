@@ -1,16 +1,16 @@
 struct NoExpand <: Algorithm end
 
 function changebonds_left(AL, Cs, alg; kwargs...)
-    @info "Old size: $(dim(right_virtualspace(AL)))"
+    # @info "Old size: $(dim(right_virtualspace(AL)))"
     AL, Cs = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
-    @info "New size: $(dim(right_virtualspace(AL)))"
+    # @info "New size: $(dim(right_virtualspace(AL)))"
     return AL, Cs
 end
 function changebonds_right(Cs, AR, alg; kwargs...)
     Cs, AR = changebonds(; expand_leftspace = AR, embed_rightspace = Cs, alg, kwargs...)[[1,4]]
     return Cs, AR
 end
-function changebonds(al,c,ar; kwargs...)
+function changebonds(al,c,ar, alg; kwargs...)
     _, al, c, ar, _ = changebonds(; expand_rightspace = al, expand_leftspace = ar, embed_both = (c,), alg, kwargs...)
     return al, only(c), ar
 end
@@ -68,8 +68,8 @@ end
 ## Idea of two-site expansion after update: full space in middle is sup(Vl ⊗ p1, Vr ⊗ p2), the compact SVD space is inf(Vl ⊗ p1, Vr ⊗ p2), which consists of kept + truncated space (if one uses a truncated SVD).
 ## Then, we want to only take samples in the sup ⊖ inf space (previosuly, I took sup - V_kept, which also added states, we just truncated!)
 function sup_inf_space(ac2)
-    VL = space(ac2, 1) ⊗ space(ac2, 2)
-    VR = space(ac2, 3) ⊗ space(ac2, 4)
+    VL = fuse(space(ac2, 1) ⊗ space(ac2, 2))
+    VR = fuse(space(ac2, 3) ⊗ space(ac2, 4))
     return supremum(VL, VR) ⊖ infimum(VL, VR)
 end
 function _sample_space(space, sup, trscheme)
