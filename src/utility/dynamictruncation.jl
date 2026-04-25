@@ -15,8 +15,7 @@ export updatetruncation, DynamicTruncation
 
 Update the truncation tolerance of the algorithm `alg` based on the current iteration `iter` and the current error `ϵ`.
 """ updatetruncation
-function updatetruncation(alg, args...) 
-    println("This was called")
+function updatetruncation(alg, args...)
     return alg
 end
 
@@ -113,7 +112,6 @@ Update the truncation tolerance of the algorithm `alg` based on the current iter
 where the new tolerance is given by
 """
 function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank::Integer = 0)
-    println("This 2nd version was called")
     iter = max(iter, one(iter))
     tol_factor = alg.tol_factor^iter 
     rank_factor = alg.rank_factor^iter
