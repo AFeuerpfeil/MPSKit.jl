@@ -121,9 +121,6 @@ function updatetruncation(alg::DynamicTruncation; iter::Integer=0, current_rank:
 
     new_maxrank = int_clamp(alg.maxrank, nothing, alg.maxrank_max, rank_factor)
     new_maxrank = isnothing(new_maxrank) ? nothing : max(0, new_maxrank - current_rank)
-    if !iszero(current_rank)
-        @info "current rank: $current_rank, new maxrank: $new_maxrank"
-    end
 
     strategy = MatrixAlgebraKit.TruncationStrategy(;
         atol = new_atol,

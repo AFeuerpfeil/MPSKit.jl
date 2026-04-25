@@ -1,9 +1,7 @@
 struct NoExpand <: Algorithm end
 
 function changebonds_left(AL, Cs, alg; kwargs...)
-    # @info "Old size: $(dim(right_virtualspace(AL)))"
     AL, Cs = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
-    # @info "New size: $(dim(right_virtualspace(AL)))"
     return AL, Cs
 end
 function changebonds_right(Cs, AR, alg; kwargs...)
@@ -123,9 +121,46 @@ end
 extract_sector_types(::Type{GradedSpace{S,D}}) where {S<:Sector,D} = (S,)
 extract_sector_types(::Type{GradedSpace{ProductSector{T},D}}) where {T<:Tuple,D} = Tuple(T.parameters)
 extract_sector_types(sp::GradedSpace) = extract_sector_types(typeof(sp))
-function generate_sampling_space(psi::MPSKit.AbstractMPS, cutoff::Integer=100)
+function generate_sampling_space(psi::MPSKit.AbstractMPS; cutoff::Integer=100, minsize::Integer=1)
     sp = physicalspace(psi.AL[1])
-    x = extract_sector_types(sp)
-    iterator = Iterators.product((Iterators.take(values(T),cutoff) for T in x)...)
-    return typeof(sp)([T=>1 for T in iterator])
+    I = sectortype(sp)
+    types = extract_sector_types(sp)
+    iterators = [values(T) for T in types]
+    iterator = constrained_product(iterators, cutoff)
+
+    r = collect(I(T) => minsize for T in iterator)
+    if sp isa GradedSpace
+        b=TensorKit.SectorDict{I, Int}(r)
+        return GradedSpace{I, TensorKit.SectorDict{I, Int}}(b, false)
+    end
+    return typeof(sp)(r)
+end
+
+function constrained_product(iters, cutoff)
+    N = length(iters)
+    
+    # 1. Materialize the necessary prefixes (0 to cutoff -> cutoff + 1 elements)
+    prefixes = [collect(Iterators.take(it, cutoff + 1)) for it in iters]
+
+    # 2. Lazy generation via Channel
+    return Channel() do channel
+        function recurse(dim, current_sum, current_tuple)
+            if dim == N
+                # Remaining budget for the last dimension
+                remaining = cutoff - current_sum
+                for i in 0:remaining
+                    # i+1 because Julia is 1-indexed for array access
+                    put!(channel, (current_tuple..., prefixes[dim][i+1]))
+                end
+            else
+                # Each index can be anything from 0 up to the remaining budget
+                upper_bound = cutoff - current_sum
+                for i in 0:upper_bound
+                    recurse(dim + 1, current_sum + i, (current_tuple..., prefixes[dim][i+1]))
+                end
+            end
+        end
+        
+        recurse(1, 0, ())
+    end
 end
