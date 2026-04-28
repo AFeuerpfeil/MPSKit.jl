@@ -137,6 +137,8 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
     ϵ = maximum(ϵs)
     log = IterLog("DMRG2")
 
+    E = 0.0
+
     LoggingExtras.withlevel(; alg.verbosity) do
         for iter in 1:(alg.maxiter)
             alg_eigsolve = updatetol(alg.alg_eigsolve, iter, ϵ)
@@ -151,7 +153,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
-                al, (c,) = changebonds_left(al, (c, ), expscheme; ac2 = ac2)
+                al, c = changebonds_left(al, c, expscheme; ac2 = ac2)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))
@@ -159,6 +161,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 ψ.AC[pos] = (al, complex(c))
                 ψ.AC[pos + 1] = (complex(c), _transpose_front(ar))
             end
+            println(ϵs)
 
             # right to left sweep
             for pos in (length(ψ) - 2):-1:1
@@ -167,7 +170,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
-                (c,), ar = changebonds_right((c,), ar, expscheme; ac2 = ac2)
+                c, ar = changebonds_right(c, ar, expscheme; ac2 = ac2)
                 normalize!(c)
                 v = @plansor ac2[1 2; 3 4] * conj(al[1 2; 5]) * conj(c[5; 6]) * conj(ar[6; 3 4])
                 ϵs[pos] = max(ϵs[pos], abs(1 - abs(v)))
@@ -179,16 +182,17 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
             ϵ = maximum(ϵs)
             ψ, envs = alg.finalize(iter, ψ, H, envs)::Tuple{typeof(ψ), typeof(envs)}
 
+            E = expectation_value(ψ, H, envs)
             if ϵ <= alg.tol && iter > alg.miniter
-                @infov 2 logfinish!(log, iter, ϵ, expectation_value(ψ, H, envs))
+                @infov 2 logfinish!(log, iter, ϵ, E)
                 break
             end
             if iter == alg.maxiter
-                @warnv 1 logcancel!(log, iter, ϵ, expectation_value(ψ, H, envs))
+                @warnv 1 logcancel!(log, iter, ϵ, E)
             else
-                @infov 3 logiter!(log, iter, ϵ, expectation_value(ψ, H, envs))
+                @infov 3 logiter!(log, iter, ϵ, E)
             end
         end
     end
-    return ψ, envs, ϵ
+    return ψ, envs, ϵ, E
 end

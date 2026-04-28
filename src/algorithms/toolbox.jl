@@ -55,6 +55,7 @@ Concretely, this is the overlap of the current state with the single-site deriva
 """
 function calc_galerkin(pos::Int, below, operator, above, envs)
     AC´ = AC_projection(pos, below, operator, above, envs)
+    iszero(norm(AC´)) && return 1.0
     normalize!(AC´)
     out = mul!(AC´, below.AL[pos], below.AL[pos]' * AC´, -1, +1)
     return norm(out)

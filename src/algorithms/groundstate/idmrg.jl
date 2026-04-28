@@ -161,37 +161,67 @@ end
 function _localupdate_sweep_idmrg!(ψ, H, envs, alg_eigsolve, alg_trscheme, expscheme)
     local E
     C_old = ψ.C[0]
+
     # left to right sweep
-    for pos in 1:length(ψ)
+    _idmrg_move_right!(ψ, H, envs, 1, alg_trscheme, expscheme) # We don't update the first site, as the backwards sweep will update it!
+    for pos in 2:length(ψ)
+        println("Left: pos = $pos")
         h = AC_hamiltonian(pos, ψ, H, ψ, envs)
         _, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
-        ψ.AL[pos], ψ.C[pos] = left_orth!(ψ.AC[pos]; trunc = alg_trscheme)
-        ψ.AL[pos], (ψ.C[pos], ψ.AC[pos + 1], ψ.AL[pos + 1]) = changebonds_left(ψ.AL[pos], (ψ.C[pos], ψ.AC[pos + 1], ψ.AL[pos + 1]), expscheme)
-        if pos == length(ψ) # AC needed in next sweep
-            ψ.AC[pos] = _mul_tail(ψ.AL[pos], ψ.C[pos])
-        end
-        transfer_leftenv!(envs, ψ, H, ψ, pos + 1)
+        _idmrg_move_right!(ψ, H, envs, pos, alg_trscheme, expscheme)
     end
+    _idmrg_move_left!(ψ, H, envs, length(ψ), alg_trscheme, expscheme)
 
     # right to left sweep
-    for pos in length(ψ):-1:1
+    for pos in length(ψ)-1:-1:1
+        println("Right: pos = $pos")
         h = AC_hamiltonian(pos, ψ, H, ψ, envs)
         E, ψ.AC[pos] = fixedpoint(h, ψ.AC[pos], :SR, alg_eigsolve)
 
-        C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = alg_trscheme)
-        (ψ.C[pos - 1], ψ.AR[pos - 1], ψ.AC[pos - 1]), temp = changebonds_right((C, ψ.AR[pos - 1],ψ.AC[pos - 1]), temp, expscheme)
-        ψ.AR[pos] = _transpose_front(temp)
-        if pos == 1 # AC needed in next sweep
-            ψ.AC[pos] = _mul_front(ψ.C[pos - 1], ψ.AR[pos])
-        end
-
-        transfer_rightenv!(envs, ψ, H, ψ, pos - 1)
+        _idmrg_move_left!(ψ, H, envs, pos, alg_trscheme, expscheme)
     end
+   
+
     return ψ, envs, C_old, E
 end
 
+function _idmrg_move_right!(ψ, H,envs, pos, alg_trscheme, expscheme)
+    ψ.AL[pos], ψ.C[pos] = left_orth!(ψ.AC[pos]; trunc = alg_trscheme)
+    ψ.AL[pos], ψ.C[pos] = changebonds_left(ψ.AL[pos], ψ.C[pos], expscheme)
 
-function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg_svd, expscheme)
+    ψ.AC[pos + 1] = _mul_front(ψ.C[pos], ψ.AR[pos + 1])
+    if pos == length(ψ) # AC needed in next sweep
+        # ψ.AC[pos] = _mul_tail(ψ.AL[pos], ψ.C[pos])
+        ψ.AL[pos + 1] = ψ.AC[pos + 1] / ψ.C[pos + 1]
+    end
+    
+    # if pos == length(ψ) # AC needed in next sweep
+    #     ψ.AC[pos] = _mul_tail(ψ.AL[pos], ψ.C[pos])
+    # end
+    transfer_leftenv!(envs, ψ, H, ψ, pos + 1)
+end
+function _idmrg_move_left!(ψ, H, envs, pos, alg_trscheme, expscheme)
+    C, temp = right_orth!(_transpose_tail(ψ.AC[pos]); trunc = alg_trscheme)
+    # if pos == 1
+    #     (ψ.C[pos - 1], ψ.AR[pos - 1]), temp = changebonds_right((C, ψ.AR[pos - 1]), temp, expscheme)
+    # else
+        C, temp = changebonds_right(C, temp, expscheme)
+    # end
+    ψ.C[pos] = C
+    ψ.AR[pos] = _transpose_front(temp)
+    ψ.AC[pos - 1] = _mul_tail(ψ.AL[pos - 1], C)
+    # if pos == 1 # AC needed in next sweep
+    #     ψ.AC[pos] = _mul_front(ψ.C[pos - 1], ψ.AR[pos])
+    # end
+    if pos == 1 
+        ψ.AR[pos - 1] = ψ.AC[pos - 1] / ψ.C[pos - 2]
+    end
+
+    transfer_rightenv!(envs, ψ, H, ψ, pos - 1)
+end
+
+function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg_svd, expscheme, tol=1e-8)
+    # @show maxlinkdim(ψ)
     # sweep from left to right
     for pos in 1:(length(ψ) - 1)
         ac2 = AC2(ψ, pos; kind = :ACAR)
@@ -199,20 +229,21 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
         _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
         al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-        al, (c, ψ.AL[pos + 1]) = changebonds_left(al, (c, ψ.AL[pos + 1]), expscheme; ac2=ac2)
+        al, c = changebonds_left(al, c, expscheme; ac2=ac2)
         normalize!(c)
 
         ψ.AL[pos] = al
         ψ.C[pos] = complex(c)
         ψ.AR[pos + 1] = _transpose_front(ar)
         ψ.AC[pos + 1] = _transpose_front(c * ar)
-
         transfer_leftenv!(envs, ψ, H, ψ, pos + 1)
         transfer_rightenv!(envs, ψ, H, ψ, pos)
     end
 
     # update the edge
-    ψ.AL[end] = ψ.AC[end] / ψ.C[end]
+    # ψ.AL[end] = ψ.AC[end] / ψ.C[end]
+    ψ.AL[end] = ψ.AC[end] * pinv(ψ.C[end]; atol=tol)
+
     ψ.AC[1] = _mul_tail(ψ.AL[1], ψ.C[1])
     ac2 = AC2(ψ, length(ψ); kind = :ALAC)
     h_ac2 = AC2_hamiltonian(length(ψ), ψ, H, ψ, envs)
@@ -228,7 +259,8 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
 
     ψ.AC[end] = _mul_tail(al, c)
     ψ.AC[end+1] = _transpose_front(c * ar)
-    ψ.AL[end+1] = ψ.AC[end+1] / ψ.C[end+1]
+    # ψ.AL[end+1] = ψ.AC[end+1] / ψ.C[end+1]
+    ψ.AL[end+1] = ψ.AC[end+1] * pinv(ψ.C[end+1]; atol=tol)
 
     C_old = complex(c)
 
@@ -243,7 +275,7 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
         _, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
 
         al, c, ar = svd_trunc!(ac2′; trunc = alg_trscheme, alg = alg_svd)
-        (c, ψ.AR[pos]), ar = changebonds_right((c, ψ.AR[pos]), ar, expscheme; ac2=ac2)
+        c, ar = changebonds_right(c, ar, expscheme; ac2=ac2)
         normalize!(c)
 
         ψ.AL[pos] = al
@@ -258,7 +290,9 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
 
     # update the edge
     ψ.AC[0] = _mul_front(ψ.C[- 1], ψ.AR[0])
-    ψ.AR[1] = _transpose_front(ψ.C[0] \ _transpose_tail(ψ.AC[1]))
+    # ψ.AR[1] = _transpose_front(ψ.C[0] \ _transpose_tail(ψ.AC[1]))
+    ψ.AR[1] = _transpose_front(pinv(ψ.C[0]; atol=tol) * _transpose_tail(ψ.AC[1]))
+
     ac2 = AC2(ψ, 0; kind = :ACAR)
     h_ac2 = AC2_hamiltonian(0, ψ, H, ψ, envs)
     E, ac2′ = fixedpoint(h_ac2, ac2, :SR, alg_eigsolve)
@@ -270,7 +304,8 @@ function _localupdate_sweep_idmrg2!(ψ, H, envs, alg_eigsolve, alg_trscheme, alg
     ψ.C[0] = complex(c)
     ψ.AR[1] = _transpose_front(ar)
 
-    ψ.AR[0] = _transpose_front(ψ.C[-1] \ _transpose_tail(al * c))
+    # ψ.AR[0] = _transpose_front(ψ.C[-1] \ _transpose_tail(al * c))
+    ψ.AR[0] = _transpose_front(pinv(ψ.C[-1]; atol=tol) * _transpose_tail(al * c))
     ψ.AC[1] = _transpose_front(c * ar)
 
     transfer_leftenv!(envs, ψ, H, ψ, 1)

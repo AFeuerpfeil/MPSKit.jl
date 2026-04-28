@@ -1,16 +1,34 @@
 struct NoExpand <: Algorithm end
 
-function changebonds_left(AL, Cs, alg; kwargs...)
-    AL, Cs = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
-    return AL, Cs
+function changebonds_left(AL, C::AbstractTensorMap, alg; kwargs...)
+    Anew, Cnew = changebonds_left(AL, (C,), alg; kwargs...)
+    return Anew, only(Cnew)
+end
+function changebonds_left(AL, Cs::Tuple, alg; kwargs...)
+    ALnew, Csnew = changebonds(; expand_rightspace = AL, embed_leftspace = Cs, alg, kwargs...)[[2,end]]
+    Csnew = collect(Csnew)
+    for i in eachindex(Csnew)[1:1]
+        @assert ALnew * Csnew[i] ≈ AL * Cs[i] "Error in left embedding is large"
+    end
+    return ALnew, Csnew
+end
+
+function changebonds_right(C::AbstractTensorMap, AR, alg; kwargs...)
+    Cnew, ARnew = changebonds_right((C,), AR, alg; kwargs...)
+    return only(Cnew), ARnew
 end
 function changebonds_right(Cs, AR, alg; kwargs...)
-    Cs, AR = changebonds(; expand_leftspace = AR, embed_rightspace = Cs, alg, kwargs...)[[1,4]]
-    return Cs, AR
+    Csnew, ARnew = changebonds(; expand_leftspace = AR, embed_rightspace = Cs, alg, kwargs...)[[1,4]]
+    Csnew = collect(Csnew)
+    for i in eachindex(Csnew)[1:1]
+        @assert Csnew[i] * ARnew ≈ Cs[i] * AR "Error in right embedding is $(norm(Csnew[i] * ARnew - Cs[i] * AR))"
+    end
+    return Csnew, ARnew
 end
 function changebonds(al,c,ar, alg; kwargs...)
-    _, al, c, ar, _ = changebonds(; expand_rightspace = al, expand_leftspace = ar, embed_both = (c,), alg, kwargs...)
-    return al, only(c), ar
+    _, alnew, cnew, arnew, _ = changebonds(; expand_rightspace = al, expand_leftspace = ar, embed_both = (c,), alg, kwargs...)
+    @assert alnew * only(cnew) * arnew ≈ al * c * ar "Error in two-site embedding is $(norm(alnew * only(cnew) * arnew - al * c * ar))"
+    return alnew, only(cnew), arnew
 end
 
 function changebonds(;
@@ -21,8 +39,8 @@ function changebonds(;
         embed_both = missing,
         alg,
         ac2 = missing,
-        expansion_leftspace = ismissing(ac2) ? missing : sup_inf_space(ac2),
-        expansion_rightspace = ismissing(expansion_leftspace) ? (ismissing(ac2) ? missing : sup_inf_space(ac2)) : expansion_leftspace,
+        expansion_leftspace =missing, # = ismissing(ac2) ? missing : sup_inf_space(ac2),
+        expansion_rightspace = missing #ismissing(expansion_leftspace) ? (ismissing(ac2) ? missing : sup_inf_space(ac2)) : expansion_leftspace,
     )
     return changebonds(
         embed_rightspace, expand_rightspace,embed_both, expand_leftspace, embed_leftspace, alg;
@@ -36,24 +54,28 @@ function changebonds(
     )
     if !ismissing(expand_rightspace)
         expand_rightspace_new = _expand_leftisometry(expand_rightspace, alg, expansion_leftspace)
-        if space(expand_rightspace) != space(expand_rightspace_new) || true
+        if space(expand_rightspace) != space(expand_rightspace_new)
+            println("happened1")
             if !ismissing(embed_leftspace)
-                embed_leftspace = (_embed_left_space(expand_rightspace_new, A, alg) for A in embed_leftspace)
+                embed_leftspace = collect(_embed_left_space(expand_rightspace_new, expand_rightspace,A) for A in embed_leftspace)
             end
             if !ismissing(embed_both)
-                embed_both = (_embed_left_space(expand_rightspace_new, A, alg) for A in embed_both)
+                embed_both = collect(_embed_left_space(expand_rightspace_new, expand_rightspace, A) for A in embed_both)
             end
+        else 
+            @assert expand_rightspace ≈ expand_rightspace_new "Error: expand_rightspace is not approximately equal to expand_rightspace_new, but their spaces are the same. This should not happen."
         end
         expand_rightspace = expand_rightspace_new
     end
     if !ismissing(expand_leftspace)
         expand_leftspace_new = _expand_rightisometry(expand_leftspace, alg, expansion_rightspace)
-        if space(expand_leftspace) != space(expand_leftspace_new) || true
+        if space(expand_leftspace) != space(expand_leftspace_new)
+            println("happened2")
             if !ismissing(embed_rightspace)
-                embed_rightspace = (_embed_right_space(A, expand_leftspace_new, alg) for A in embed_rightspace)
+                embed_rightspace = collect(_embed_right_space(A,expand_leftspace, expand_leftspace_new) for A in embed_rightspace)
             end
             if !ismissing(embed_both)
-                embed_both = (_embed_right_space(A, expand_leftspace_new, alg) for A in embed_both)
+                embed_both = collect(_embed_right_space(A, expand_leftspace, expand_leftspace_new) for A in embed_both)
             end
         end
         expand_leftspace = expand_leftspace_new
@@ -68,6 +90,9 @@ end
 function sup_inf_space(ac2)
     VL = fuse(space(ac2, 1) ⊗ space(ac2, 2))
     VR = fuse(space(ac2, 3) ⊗ space(ac2, 4))
+    @show VL, VR 
+    @show supremum(VL, VR), infimum(VL, VR)
+    @show supremum(VL, VR) ⊖ infimum(VL, VR)
     return supremum(VL, VR) ⊖ infimum(VL, VR)
 end
 function _sample_space(space, sup, trscheme)
@@ -77,8 +102,13 @@ end
 function _expand_leftisometry(A::MPSTensor, alg, expansion_leftspace)
     VL = left_null(A)
     V = _sample_space(right_virtualspace(VL), expansion_leftspace, alg.trscheme)
+    # @show right_virtualspace(VL), expansion_leftspace, V
+    dim(V) == 0 && return A
     XL = randisometry(scalartype(VL), right_virtualspace(VL) ← V)
-    return catdomain(A, VL * XL)
+    x = catdomain(A, VL * XL)
+    @tensor I1[right'; right] := x[phys,left,right] * conj(x[phys,left,right'])
+    @assert I1 ≈ one(I1) "I1 is $I1"
+    return x
 end
 
 function _expand_rightisometry(A::MPSTensor, alg, expansion_rightspace)
@@ -86,42 +116,80 @@ function _expand_rightisometry(A::MPSTensor, alg, expansion_rightspace)
 end
 function _expand_rightisometry(AR_tail::AbstractTensorMap, alg, expansion_rightspace)
     VR = right_null(AR_tail)
+    @tensor overlap[left'; left] := AR_tail[left,phys,right] * conj(VR[left',phys,right])
+    @assert abs(norm(overlap))<1e-10 "Error in overlap is $(norm(overlap))"
+
     V = _sample_space(space(VR, 1), expansion_rightspace, alg.trscheme)
+    dim(V) == 0 && return AR_tail
     XR = randisometry(scalartype(VR), space(VR, 1) ← V)
-    return catcodomain(AR_tail, XR' * VR)
+    b = XR' * VR
+    @tensor I1[left; left'] := b[left,phys,right] * conj(b[left',phys,right])
+    @assert I1 ≈ one(I1) "Error in b is $(norm(I1 - one(I1))) $(norm(I1)), $(norm(one(I1)))"
+    
+    x = catcodomain(AR_tail, b)
+    x = _transpose_front(x)
+    @tensor I1[left'; left] := x[left,phys,right] * conj(x[left',phys,right])
+    @assert I1 ≈ one(I1) "Error is $(norm(I1 - one(I1))) $(norm(I1)), $(norm(one(I1)))"
+    return _transpose_tail(x)
 end
 
-function _embed_left_space(A::MPSTensor, C::MPSBondTensor, alg)
+function _embed_left_space(A::MPSTensor, C::MPSBondTensor, alg::Algorithm)
     C′ = similar(C, right_virtualspace(A) ← right_virtualspace(C))
     scale!(randn!(C′), alg.noisefactor)
     C′ = TensorKit.absorb!(C′, C)
     return C′
 end
-function _embed_left_space(A::MPSTensor, Anext::MPSTensor, alg)
+function _embed_left_space(A::MPSTensor, Anext::MPSTensor, alg::Algorithm)
     Anext′ = similar(Anext, right_virtualspace(A) ⊗ physicalspace(Anext) ← right_virtualspace(Anext))
     scale!(randn!(Anext′), alg.noisefactor)
     Anext′ = TensorKit.absorb!(Anext′, Anext)
     return Anext′
 end
 
-function _embed_right_space(C::MPSBondTensor, A::AbstractTensorMap, alg)
+function _embed_right_space(C::MPSBondTensor, A::AbstractTensorMap, alg::Algorithm)
     C′ = similar(C, left_virtualspace(C) ← space(A, 1))
     scale!(randn!(C′), alg.noisefactor)
     C′ = TensorKit.absorb!(C′, C)
     return C′
 end
-function _embed_right_space(Anext::MPSTensor, A::AbstractTensorMap, alg)
+function _embed_right_space(Anext::MPSTensor, A::AbstractTensorMap, alg::Algorithm)
     Anext′ = similar(Anext, left_virtualspace(Anext) ⊗ physicalspace(Anext) ← space(A, 1))
     scale!(randn!(Anext′), alg.noisefactor)
     Anext′ = TensorKit.absorb!(Anext′, Anext)
     return Anext′
 end
 
+function _embed_left_space(A::MPSTensor, Aold::MPSTensor, C::MPSBondTensor)
+    @tensor C_new[-1; -2] := conj(A[1,2;-1])*Aold[1,2;3] *C[3; -2]
+    return add_noise(C_new)
+end
+function _embed_left_space(A::MPSTensor, Aold::MPSTensor, C::MPSTensor)
+    @tensor C_new[-1,-2; -3] := conj(A[1,2;-1])*Aold[1,2;3]*C[3,-2; -3]
+    return add_noise(C_new)
+end
+function _embed_right_space(C::MPSBondTensor, Aold::AbstractTensorMap, A::AbstractTensorMap)
+    @tensor C_new[-1; -2] := C[-1; 1]*Aold[1,2;3]*conj(A[-2,2; 3])
+    return add_noise(C_new)
+end
+function _embed_right_space(C::MPSTensor, Aold::AbstractTensorMap, A::AbstractTensorMap)
+    @tensor C_new[-1,-2; -3] := C[-1,-2; 1]*Aold[1,2;3]*conj(A[-3,2; 3])
+    return add_noise(C_new)
+end
+
+function add_noise(A::AbstractTensorMap, noisefactor=eps()^(3/4))
+    A′ = similar(A)
+    scale!(randn!(A′), noisefactor)
+    return A + A′
+end
+
+
+
+
 
 extract_sector_types(::Type{GradedSpace{S,D}}) where {S<:Sector,D} = (S,)
 extract_sector_types(::Type{GradedSpace{ProductSector{T},D}}) where {T<:Tuple,D} = Tuple(T.parameters)
 extract_sector_types(sp::GradedSpace) = extract_sector_types(typeof(sp))
-function generate_sampling_space(psi::MPSKit.AbstractMPS; cutoff::Integer=100, minsize::Integer=1)
+function generate_sampling_space(psi::MPSKit.AbstractMPS; cutoff::Integer=50, minsize::Integer=1)
     sp = physicalspace(psi.AL[1])
     I = sectortype(sp)
     types = extract_sector_types(sp)
@@ -138,29 +206,41 @@ end
 
 function constrained_product(iters, cutoff)
     N = length(iters)
-    
-    # 1. Materialize the necessary prefixes (0 to cutoff -> cutoff + 1 elements)
-    prefixes = [collect(Iterators.take(it, cutoff + 1)) for it in iters]
 
-    # 2. Lazy generation via Channel
+    # Materialize prefixes up to cutoff (0..cutoff -> cutoff + 1 elements)
+    prefixes = [collect(Iterators.take(it, cutoff + 1)) for it in iters]
+    cutoff_sq = cutoff^2
+
+    # Generate tuples whose index-vector lies inside an L2 ball (sphere)
+    # i.e. sum(i.^2) <= cutoff^2. We prune by limiting each coordinate
+    # to floor(sqrt(remaining_budget_sq)) and to the available prefix length.
     return Channel() do channel
-        function recurse(dim, current_sum, current_tuple)
+        function recurse(dim, current_sqsum, current_tuple)
+            # available maximum index for this dimension from collected prefix
+            max_avail = length(prefixes[dim]) - 1
+            if max_avail < 0
+                return
+            end
+
             if dim == N
-                # Remaining budget for the last dimension
-                remaining = cutoff - current_sum
-                for i in 0:remaining
-                    # i+1 because Julia is 1-indexed for array access
-                    put!(channel, (current_tuple..., prefixes[dim][i+1]))
+                rem_sq = cutoff_sq - current_sqsum
+                max_i = min(max_avail, floor(Int, sqrt(max(0, rem_sq))))
+                if max_i >= 0
+                    for i in 0:max_i
+                        put!(channel, (current_tuple..., prefixes[dim][i+1]))
+                    end
                 end
             else
-                # Each index can be anything from 0 up to the remaining budget
-                upper_bound = cutoff - current_sum
-                for i in 0:upper_bound
-                    recurse(dim + 1, current_sum + i, (current_tuple..., prefixes[dim][i+1]))
+                rem_sq = cutoff_sq - current_sqsum
+                max_i = min(max_avail, cutoff, floor(Int, sqrt(max(0, rem_sq))))
+                if max_i >= 0
+                    for i in 0:max_i
+                        recurse(dim + 1, current_sqsum + i*i, (current_tuple..., prefixes[dim][i+1]))
+                    end
                 end
             end
         end
-        
+
         recurse(1, 0, ())
     end
 end

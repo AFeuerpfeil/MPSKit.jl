@@ -15,7 +15,7 @@ export updatetruncation, DynamicTruncation
 
 Update the truncation tolerance of the algorithm `alg` based on the current iteration `iter` and the current error `ϵ`.
 """ updatetruncation
-function updatetruncation(alg, args...)
+function updatetruncation(alg, args...; kwargs...)
     return alg
 end
 

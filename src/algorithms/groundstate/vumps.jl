@@ -82,7 +82,8 @@ function dominant_eigsolve(
     it = IterativeSolver(alg, state)
 
     return LoggingExtras.withlevel(; alg.verbosity) do
-        @infov 2 loginit!(log, ϵ, sum(expectation_value(mps, operator, envs)))
+        @infov 2 loginit!(log, ϵ, expectation_value(mps, operator, envs))
+
 
         for (mps, envs, ϵ) in it
             if ϵ ≤ alg.tol
@@ -104,14 +105,14 @@ end
 function Base.iterate(it::IterativeSolver{<:VUMPS}, state = it.state)
     if it.sequential
         for site in eachsite(state.mps)
-            @time "update" ACs = localupdate_step!(it, state, site)
-            @time "gauge" mps = gauge_step!(it, state, ACs)
-            @time "envs" envs = envs_step!(it, state, mps)
+            ACs = localupdate_step!(it, state, site)
+            mps = gauge_step!(it, state, ACs)
+            envs = envs_step!(it, state, mps)
         end
     else
-        @time "update" ACs = localupdate_step!(it, state)
-        @time "gauge" mps = gauge_step!(it, state, ACs)
-        @time "envs" envs = envs_step!(it, state, mps)
+        ACs = localupdate_step!(it, state)
+        mps = gauge_step!(it, state, ACs)
+        envs = envs_step!(it, state, mps)
     end
 
 
