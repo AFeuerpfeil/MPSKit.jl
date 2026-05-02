@@ -132,7 +132,7 @@ function DMRG2(;
     return DMRG2(tol, maxiter, miniter, verbosity, alg_eigsolve′, alg_svd, trscheme, expscheme, finalize)
 end
 
-function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environments(ψ, H))
+function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environments(ψ, H), prepare=false)
     ϵs = map(pos -> calc_galerkin(pos, ψ, H, ψ, envs), 1:length(ψ))
     ϵ = maximum(ϵs)
     log = IterLog("DMRG2")
@@ -149,7 +149,7 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
             # left to right sweep
             for pos in 1:(length(ψ) - 1)
                 @plansor ac2[-1 -2; -3 -4] := ψ.AC[pos][-1 -2; 1] * ψ.AR[pos + 1][1 -4; -3]
-                Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs)
+                Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs; prepare)
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)
@@ -161,12 +161,11 @@ function find_groundstate!(::FiniteChainStyle, ψ, H, alg::DMRG2, envs = environ
                 ψ.AC[pos] = (al, complex(c))
                 ψ.AC[pos + 1] = (complex(c), _transpose_front(ar))
             end
-            println(ϵs)
 
             # right to left sweep
             for pos in (length(ψ) - 2):-1:1
                 @plansor ac2[-1 -2; -3 -4] := ψ.AL[pos][-1 -2; 1] * ψ.AC[pos + 1][1 -4; -3]
-                Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs)
+                Hac2 = AC2_hamiltonian(pos, ψ, H, ψ, envs; prepare)
                 _, newA2center = fixedpoint(Hac2, ac2, :SR, alg_eigsolve)
 
                 al, c, ar = svd_trunc!(newA2center; trunc = trscheme, alg = alg.alg_svd)

@@ -1,40 +1,72 @@
 """
-    correlator(ψ, O1, O2, i, j)
-    correlator(ψ, O12, i, j)
+    correlator(ψ, (O1, O2, ..., ON), (is, ds1, ..., dsN-1); connected=false)
 
-Compute the 2-point correlator <ψ|O1[i]O2[j]|ψ> for inserting `O1` at `i` and `O2` at `j`.
-Also accepts ranges for `j`.
+Compute the N-point correlator `<ψ|O1[i] O2[i+d1] O3[i+d1+d2] ... ON[i+d1+…+dN-1]|ψ>`
+for all combinations of starting positions and distances.
 
-`O1` and `O2` can each be:
-- an `MPOTensor` (single-site operator with trivial virtual legs),
-- an `AbstractTensorMap{S,N,N}` (nonlocal N-site operator, decomposed internally), or
-- a `PeriodicVector{<:MPOTensor}` (site-dependent single-site operators).
+Index tuple `(is, ds1, …, dsN-1)`:
+- `is`   : positions of O1 (Integer or AbstractRange{Int})
+- `dsk`  : distance from operator k to operator k+1, k = 1…N-1
 
-    correlator(ψ, O1, O2, O3, O4, i1, i2, i3, i4)
+All distances must be ≥ 1. The output is an array of shape
+`(length(is), length(ds1), …, length(dsN-1))`, with singleton dimensions squeezed out
+when the corresponding index was given as a plain Integer.
 
-Compute the 4-point correlator <ψ|O1[i1]O2[i2]O3[i3]O4[i4]|ψ> with i1 < i2 < i3 < i4.
-Each operator can be an `MPOTensor` or a `PeriodicVector{<:MPOTensor}`.
+Each operator can be:
+- an `MPOTensor` (single-site with trivial virtual legs),
+- a `PeriodicArray{<:MPOTensor,1}` (site-dependent single-site operators), or
+- an `AbstractTensorMap{S,K,K}` with K ≥ 3 (multi-site, decomposed internally).
+
+If `connected=true`, subtract the disconnected contribution via the full cumulant expansion
+(inclusion-exclusion over all proper set partitions).
+
+Convenience dispatchers for small N:
+
+    correlator(ψ, O, i; connected=false)
+    correlator(ψ, O1, O2, i, d; connected=false)
+    correlator(ψ, O1, O2, O3, i, d1, d2; connected=false)
+    correlator(ψ, O1, O2, O3, O4, i, d1, d2, d3; connected=false)
 """
 function correlator end
+
+# -----------------------------------------------------------------------
+# Small-N convenience dispatchers
+# -----------------------------------------------------------------------
+
+function correlator(state::AbstractMPS, O, i; kwargs...)
+    return correlator(state, (O,), (i,); kwargs...)
+end
+
+function correlator(state::AbstractMPS, O1, O2, i, d; kwargs...)
+    return correlator(state, (O1, O2), (i, d); kwargs...)
+end
+
+function correlator(state::AbstractMPS, O1, O2, O3, i, d1, d2; kwargs...)
+    return correlator(state, (O1, O2, O3), (i, d1, d2); kwargs...)
+end
+
+function correlator(
+        state::AbstractMPS, O1, O2, O3, O4, i, d1, d2, d3; kwargs...
+    )
+    return correlator(state, (O1, O2, O3, O4), (i, d1, d2, d3); kwargs...)
+end
 
 # -----------------------------------------------------------------------
 # Internal helpers
 # -----------------------------------------------------------------------
 
-# Wrap a bare MPOTensor into a PeriodicVector of the given length.
-_as_periodic(O::MPOTensor, L::Int) = PeriodicArray(fill(O, L))
+_as_periodic(O, L::Int) = PeriodicArray(fill(O, L))
 _as_periodic(O::PeriodicArray, ::Int) = O
 
-# Advance Vₗ by one site with an intermediate MPO tensor (non-trivial virtual bonds).
-# Vₗ has shape [-1 -2; -3] where -2 carries the running MPO virtual bond.
-# The output Vₗ has the same shape with updated bonds.
 function _transfer_right_mpo(Vₗ, o::MPOTensor, AR)
     return @plansor Vₗ_new[-1 -2; -3] := Vₗ[1 2; 4] * AR[4 5; -3] * o[2 3; 5 -2] *
         conj(AR[1 3; -1])
 end
 
-# Push a sequence of MPO tensors (interior pieces, i.e. all but the last) into Vₗ
-# using state.AR tensors starting at `start`. Returns (Vₗ_new, next_site).
+function _expval_mpotensor(state::AbstractMPS, O::MPOTensor, site::Int)
+    return local_expectation_value1(state, site, removeunit(removeunit(O, 1), 3))
+end
+
 function _push_ops!(Vₗ, ops, state, start::Int)
     ctr = start
     for o in ops
@@ -44,258 +76,212 @@ function _push_ops!(Vₗ, ops, state, start::Int)
     return Vₗ, ctr
 end
 
+# Normalize to PeriodicArray{<:MPOTensor,1} (single-site) or Vector{<:MPOTensor} (multi-site).
+_decompose_localmpo(O::AbstractTensorMap{<:Any, S, N, N}) where {S, N} = decompose_localmpo(add_util_leg(O))
+_decompose_localmpo(O::AbstractVector) = O
+
+# All MPOTensor pieces for operator op starting at site s.
+_op_pieces(op::PeriodicArray{<:MPOTensor, 1}, s::Int) = [op[s]]
+_op_pieces(op::PeriodicArray, s::Int) = op[s]
+_op_pieces(op::Vector, ::Int) = op
+
 # -----------------------------------------------------------------------
-# Core implementation: PeriodicVector × PeriodicVector, single-site each
+# Set partition utilities for connected (cumulant) correlators
 # -----------------------------------------------------------------------
 
-function correlator(
-        state::AbstractMPS, O₁s::PeriodicArray{<:MPOTensor, 1},
-        O₂s::PeriodicArray{<:MPOTensor, 1}, i::Int, j::Int
-    )
-    return first(correlator(state, O₁s, O₂s, i, j:j))
+function _set_partitions(elements::Vector)
+    isempty(elements) && return [Vector{eltype(elements)}[]]
+    first_elem = elements[1]
+    rest_parts = _set_partitions(elements[2:end])
+    result = []
+    for partition in rest_parts
+        push!(result, [[first_elem]; partition])
+        for (i, _) in enumerate(partition)
+            new_part = copy.(partition)
+            push!(new_part[i], first_elem)
+            push!(result, new_part)
+        end
+    end
+    return result
 end
 
-function correlator(
-        state::AbstractMPS, O₁s::PeriodicArray{<:MPOTensor, 1},
-        O₂s::PeriodicArray{<:MPOTensor, 1}, i::Int, js::AbstractRange{Int}
-    )
-    O₁ = O₁s[i]
-    first(js) > i || @error "i should be smaller than j ($i, $(first(js)))"
-    S₁ = _firstspace(O₁)
-    isunitspace(S₁) || throw(ArgumentError("O₁ should start with a trivial leg."))
+# All set partitions of 1:N except the trivial full-set partition.
+function _proper_set_partitions(N::Int)
+    return filter(p -> length(p) > 1, _set_partitions(collect(1:N)))
+end
 
-    G = similar(js, scalartype(state))
+# Möbius sign: (-1)^(|π|+1) * (|π|-1)!
+_partition_sign(π) = (-1)^(length(π) + 1) * factorial(length(π) - 1)
 
-    @plansor Vₗ[-1 -2; -3] := state.AC[i][2 3; -3] * removeunit(O₁, 1)[1; 3 -2] *
-        conj(state.AC[i][2 1; -1])
-    ctr = i + 1
+# -----------------------------------------------------------------------
+# Tuple interface: main entry point
+# -----------------------------------------------------------------------
 
-    for (k, j) in enumerate(js)
-        O₂ = O₂s[j]
-        S₂ = _lastspace(O₂)
-        S₂ == S₁' || throw(ArgumentError("O₂ should end with a trivial leg."))
-        if j > ctr
-            Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(j - 1)])
-        end
-        G[k] = @plansor Vₗ[1 2; 4] * state.AR[j][4 5; 6] * removeunit(O₂, 4)[2 3; 5] *
-            conj(state.AR[j][1 3; 6])
-        ctr = j
+# `ops`  : NTuple of operators
+# `idxs` : NTuple of N entries — first is positions of op 1, rest are distances
+function correlator(state::AbstractMPS, ops::Tuple, idxs::Tuple; connected::Bool = false)
+    N = length(ops)
+    N == length(idxs) ||
+        throw(ArgumentError("ops and idxs must have the same length (got $N vs $(length(idxs)))"))
+    L = length(state)
+    ops_norm = map(o -> _decompose_localmpo.(_as_periodic(o, L)), ops)
+    # Track which dimensions were scalar (Integer) so we can squeeze them at the end.
+    scalar_mask = map(idx -> idx isa Integer, idxs)
+    idx_ranges  = map(collect, idxs)
+    G = _correlatorN(state, ops_norm, idx_ranges, connected)
+    # Squeeze scalar dimensions (drop size-1 dims that came from plain Int indices).
+    return _squeeze(G, scalar_mask)
+end
+
+# Drop dimensions where scalar_mask is true.
+function _squeeze(G::AbstractArray, mask)
+    dims_to_drop = Tuple(findall(identity, mask))
+    isempty(dims_to_drop) && return G
+    return dropdims(G; dims = dims_to_drop)
+end
+
+# -----------------------------------------------------------------------
+# Core N-point engine
+# -----------------------------------------------------------------------
+
+# Output: Array of shape (length(is), length(ds1), …, length(dsN-1)).
+# idx_ranges = (is, ds1, …, dsN-1), each an AbstractRange{Int}.
+function _correlatorN(state::AbstractMPS, ops_pv, idx_ranges, connected::Bool)
+    N  = length(ops_pv)
+    is = idx_ranges[1]
+
+    out_size = ntuple(k -> length(idx_ranges[k]), N)
+    G = zeros(scalartype(state), out_size...)
+
+    # Pre-compute partitions once if needed.
+    partitions = connected ? _proper_set_partitions(N) : nothing
+
+    for (ii, i) in enumerate(is)
+        pieces1 = _op_pieces(ops_pv[1], i)
+        O1_head = pieces1[1]
+        S₁ = _firstspace(O1_head)
+        isunitspace(S₁) ||
+            throw(ArgumentError("First operator must have a trivial left virtual leg."))
+
+        @plansor Vₗ[-1 -2; -3] := state.AC[i][2 3; -3] * removeunit(O1_head, 1)[1; 3 -2] *
+            conj(state.AC[i][2 1; -1])
+        Vₗ, ctr = _push_ops!(Vₗ, pieces1[2:end], state, i + 1)
+
+        _fill_G!(G, (ii,), state, ops_pv, idx_ranges, S₁, Vₗ, ctr, 2,
+                 connected, partitions)
     end
+
     return G
 end
 
-# -----------------------------------------------------------------------
-# Existing single MPOTensor interface: dispatches to PeriodicVector core
-# -----------------------------------------------------------------------
-
-function correlator(state::AbstractMPS, O₁::MPOTensor, O₂::MPOTensor, i::Int, j::Int)
-    return first(correlator(state, O₁, O₂, i, j:j))
-end
-
-function correlator(
-        state::AbstractMPS, O₁::MPOTensor, O₂::MPOTensor, i::Int, js::AbstractRange{Int}
+# Recursively fill G by iterating over distance dimensions depth=2..N.
+# idx_prefix : tuple of already-fixed output indices (length = depth-1)
+# Vₗ         : boundary vector after applying ops 1..depth-1
+# ctr        : next site (one past the last site of op depth-1)
+function _fill_G!(
+        G, idx_prefix, state, ops_pv, idx_ranges, S₁, Vₗ, ctr, depth,
+        connected, partitions
     )
-    L = length(state)
-    return correlator(state, _as_periodic(O₁, L), _as_periodic(O₂, L), i, js)
-end
+    N    = length(ops_pv)
+    ds_k = idx_ranges[depth]
 
-function correlator(
-        state::AbstractMPS, O₁₂::AbstractTensorMap{<:Any, S, 2, 2}, i::Int, j
-    ) where {S}
-    O₁, O₂ = decompose_localmpo(add_util_leg(O₁₂))
-    return correlator(state, O₁, O₂, i, j)
-end
+    for (di, d) in enumerate(ds_k)
+        d >= 1 || throw(ArgumentError("All distances must be ≥ 1 (got $d at operator $depth)"))
+        site_k = ctr + d - 1
 
-# -----------------------------------------------------------------------
-# Nonlocal 2-point correlator: AbstractTensorMap{S,N,N} with N ≥ 2
-#
-# i        = start site of O1 (spans N1 sites: i … i+N1-1)
-# j/js     = start site of O2 (spans N2 sites: j … j+N2-1), j ≥ i+N1
-# -----------------------------------------------------------------------
+        # Propagate across the gap.
+        Vₗ_k = site_k > ctr ? Vₗ * TransferMatrix(state.AR[ctr:(site_k - 1)]) : Vₗ
 
-function correlator(
-        state::AbstractMPS,
-        O₁::AbstractTensorMap{<:Any, S, N1, N1},
-        O₂::AbstractTensorMap{<:Any, S, N2, N2},
-        i::Int, j
-    ) where {S, N1, N2}
-    ops1 = decompose_localmpo(add_util_leg(O₁))
-    ops2 = decompose_localmpo(add_util_leg(O₂))
-    return _correlator_nonlocal(state, ops1, ops2, i, j)
-end
+        pieces_k = _op_pieces(ops_pv[depth], site_k)
+        new_idx  = (idx_prefix..., di)
 
-function _correlator_nonlocal(state, ops1, ops2, i::Int, j::Int)
-    return first(_correlator_nonlocal(state, ops1, ops2, i, j:j))
-end
+        if depth == N
+            # Last operator: close to a scalar.
+            last_site = site_k + length(pieces_k) - 1
+            Vₗ_mid, _ = _push_ops!(Vₗ_k, pieces_k[1:(end - 1)], state, site_k)
+            ON_last = pieces_k[end]
+            S_last  = _lastspace(ON_last)
+            S_last == S₁' ||
+                throw(ArgumentError("Last operator must end with a trivial right virtual leg."))
+            val = @plansor Vₗ_mid[1 2; 4] * state.AR[last_site][4 5; 6] *
+                removeunit(ON_last, 4)[2 3; 5] * conj(state.AR[last_site][1 3; 6])
+            G[new_idx...] = val
 
-function _correlator_nonlocal(state, ops1, ops2, i::Int, js::AbstractRange{Int})
-    first(js) >= i + length(ops1) ||
-        @error "j must be ≥ i + length(O1) ($i + $(length(ops1)), $(first(js)))"
-
-    # Validate boundary legs
-    S₁ = _firstspace(ops1[1])
-    isunitspace(S₁) || throw(ArgumentError("ops1[1] should start with a trivial leg."))
-    S₂ = _lastspace(ops2[end])
-    S₂ == S₁' || throw(ArgumentError("ops2[end] should end with a trivial leg."))
-
-    G = similar(js, scalartype(state))
-
-    # Build Vₗ at site i using the first piece of ops1 (removes trivial left leg)
-    @plansor Vₗ₀[-1 -2; -3] := state.AC[i][2 3; -3] * removeunit(ops1[1], 1)[1; 3 -2] *
-        conj(state.AC[i][2 1; -1])
-
-    # Push remaining interior pieces of O1 (all but last piece which has trivial right leg)
-    # If length(ops1) == 1, this is a no-op.
-    Vₗ_after_O1, ctr_after_O1 = _push_ops!(Vₗ₀, ops1[2:end], state, i + 1)
-
-    for (k, j) in enumerate(js)
-        Vₗ = Vₗ_after_O1
-        ctr = ctr_after_O1
-
-        # Free propagation between end of O1 and start of O2
-        if j > ctr
-            Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(j - 1)])
+            # Subtract disconnected contributions (cumulant expansion).
+            if connected
+                sites_here = _recover_sites(idx_ranges, ops_pv, new_idx)
+                for partition in partitions
+                    sgn = _partition_sign(partition)
+                    contrib = prod(partition) do block
+                        sub_ops   = tuple(ops_pv[block]...)
+                        sub_sites = tuple(sites_here[block]...)
+                        _correlator_absolute(state, sub_ops, sub_sites)
+                    end
+                    G[new_idx...] -= sgn * contrib
+                end
+            end
+        else
+            # Intermediate operator: insert and recurse.
+            Vₗ_next = _transfer_right_mpo(Vₗ_k, pieces_k[1], state.AR[site_k])
+            Vₗ_next, ctr_next = _push_ops!(Vₗ_next, pieces_k[2:end], state, site_k + 1)
+            _fill_G!(G, new_idx, state, ops_pv, idx_ranges, S₁, Vₗ_next, ctr_next,
+                     depth + 1, connected, partitions)
         end
-
-        # Push interior pieces of O2 (all but the last)
-        Vₗ_mid, _ = _push_ops!(Vₗ, ops2[1:(end - 1)], state, j)
-        last_site = j + length(ops2) - 1
-
-        # Contract last piece of O2 (trivial right leg removed) to get scalar
-        O₂_last = ops2[end]
-        G[k] = @plansor Vₗ_mid[1 2; 4] * state.AR[last_site][4 5; 6] *
-            removeunit(O₂_last, 4)[2 3; 5] * conj(state.AR[last_site][1 3; 6])
     end
-    return G
+end
+
+# N=1: no recursion needed, return expectation values directly.
+function _correlatorN(
+        state::AbstractMPS, ops_pv::Tuple{Any}, idx_ranges::Tuple{AbstractRange{Int}},
+        ::Bool
+    )
+    is = idx_ranges[1]
+    return [_expval_mpotensor(state, ops_pv[1][i], i) for i in is]
 end
 
 # -----------------------------------------------------------------------
-# PeriodicVector nonlocal variant:
-# O1 spans N1 sites (O1s[i], O1s[i+1], ..., O1s[i+N1-1])
-# O2 spans N2 sites (O2s[j], O2s[j+1], ..., O2s[j+N2-1])
-# j/js = start site of O2, j ≥ i + N1
+# Helpers for connected correction
 # -----------------------------------------------------------------------
 
-function correlator(
-        state::AbstractMPS,
-        O₁s::PeriodicArray{<:MPOTensor, 1}, N1::Int,
-        O₂s::PeriodicArray{<:MPOTensor, 1}, N2::Int,
-        i::Int, j
-    )
-    return _correlator_nonlocal_pv(state, O₁s, N1, O₂s, N2, i, j)
-end
-
-# convenience: accept bare MPOTensor for either operator
-function correlator(
-        state::AbstractMPS,
-        O₁, N1::Int,
-        O₂, N2::Int,
-        i::Int, j
-    )
-    L = length(state)
-    return _correlator_nonlocal_pv(state, _as_periodic(O₁, L), N1,
-                                   _as_periodic(O₂, L), N2, i, j)
-end
-
-function _correlator_nonlocal_pv(state, O₁s, N1::Int, O₂s, N2::Int, i::Int, j::Int)
-    return first(_correlator_nonlocal_pv(state, O₁s, N1, O₂s, N2, i, j:j))
-end
-
-function _correlator_nonlocal_pv(
-        state, O₁s, N1::Int, O₂s, N2::Int, i::Int, js::AbstractRange{Int}
-    )
-    first(js) >= i + N1 ||
-        @error "j must be ≥ i + N1 ($i + $N1, $(first(js)))"
-
-    O₁_first = O₁s[i]
-    S₁ = _firstspace(O₁_first)
-    isunitspace(S₁) || throw(ArgumentError("O₁s[i] should start with a trivial leg."))
-
-    G = similar(js, scalartype(state))
-
-    # Build Vₗ at site i from O1s[i]
-    @plansor Vₗ₀[-1 -2; -3] := state.AC[i][2 3; -3] * removeunit(O₁_first, 1)[1; 3 -2] *
-        conj(state.AC[i][2 1; -1])
-
-    # Push remaining N1-1 pieces of O1
-    ops1_rest = [O₁s[i + k] for k in 1:(N1 - 1)]
-    Vₗ_after_O1, ctr_after_O1 = _push_ops!(Vₗ₀, ops1_rest, state, i + 1)
-
-    for (idx, j) in enumerate(js)
-        Vₗ = Vₗ_after_O1
-        ctr = ctr_after_O1
-
-        if j > ctr
-            Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(j - 1)])
-        end
-
-        # Push N2-1 interior pieces of O2
-        ops2_head = [O₂s[j + k - 1] for k in 1:(N2 - 1)]
-        Vₗ_mid, _ = _push_ops!(Vₗ, ops2_head, state, j)
-
-        last_site = j + N2 - 1
-        O₂_last = O₂s[last_site]
-        S₂ = _lastspace(O₂_last)
-        S₂ == S₁' || throw(ArgumentError("O₂s at last site should end with a trivial leg."))
-
-        G[idx] = @plansor Vₗ_mid[1 2; 4] * state.AR[last_site][4 5; 6] *
-            removeunit(O₂_last, 4)[2 3; 5] * conj(state.AR[last_site][1 3; 6])
+# Recover absolute site positions from the output-array multi-index.
+# idx_ranges[1] = positions of op 1; idx_ranges[k] = distances from end of op k-1 (k ≥ 2).
+function _recover_sites(idx_ranges, ops_pv, multi_idx)
+    N = length(idx_ranges)
+    sites = Vector{Int}(undef, N)
+    sites[1] = idx_ranges[1][multi_idx[1]]
+    for k in 2:N
+        width_prev = length(_op_pieces(ops_pv[k - 1], sites[k - 1]))
+        sites[k] = sites[k - 1] + width_prev + idx_ranges[k][multi_idx[k]] - 1
     end
-    return G
+    return sites
 end
 
-# -----------------------------------------------------------------------
-# 4-point correlator
-# i1 < i2 < i3 < i4; O1 starts at i1, O4 ends at i4.
-# O2 and O3 are single-site and have trivial virtual legs on both sides.
-# -----------------------------------------------------------------------
+# Compute a correlator for a specific set of absolute site positions (no ranges).
+# Used by the cumulant expansion for sub-correlators in each partition block.
+function _correlator_absolute(state::AbstractMPS, ops_pv::Tuple, sites::Tuple)
+    N = length(ops_pv)
+    N == 1 && return _expval_mpotensor(state, ops_pv[1][sites[1]], sites[1])
 
-function correlator(
-        state::AbstractMPS,
-        O₁, O₂, O₃, O₄,
-        i1::Int, i2::Int, i3::Int, i4::Int
-    )
-    L = length(state)
-    O₁s = _as_periodic(O₁, L)
-    O₂s = _as_periodic(O₂, L)
-    O₃s = _as_periodic(O₃, L)
-    O₄s = _as_periodic(O₄, L)
-    return _correlator4(state, O₁s, O₂s, O₃s, O₄s, i1, i2, i3, i4)
-end
+    pieces1 = _op_pieces(ops_pv[1], sites[1])
+    S₁ = _firstspace(pieces1[1])
+    @plansor Vₗ[-1 -2; -3] := state.AC[sites[1]][2 3; -3] *
+        removeunit(pieces1[1], 1)[1; 3 -2] * conj(state.AC[sites[1]][2 1; -1])
+    Vₗ, ctr = _push_ops!(Vₗ, pieces1[2:end], state, sites[1] + 1)
 
-function _correlator4(state, O₁s, O₂s, O₃s, O₄s, i1::Int, i2::Int, i3::Int, i4::Int)
-    i1 < i2 < i3 < i4 || @error "Sites must be strictly increasing: ($i1, $i2, $i3, $i4)"
-
-    O₁ = O₁s[i1]
-    S₁ = _firstspace(O₁)
-    isunitspace(S₁) || throw(ArgumentError("O₁ should start with a trivial leg."))
-    S₄ = _lastspace(O₄s[i4])
-    S₄ == S₁' || throw(ArgumentError("O₄ should end with a trivial leg."))
-
-    # Build Vₗ at i1
-    @plansor Vₗ[-1 -2; -3] := state.AC[i1][2 3; -3] * removeunit(O₁, 1)[1; 3 -2] *
-        conj(state.AC[i1][2 1; -1])
-    ctr = i1 + 1
-
-    # Propagate to i2 and insert O2
-    if i2 > ctr
-        Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(i2 - 1)])
+    for k in 2:(N - 1)
+        site_k = sites[k]
+        Vₗ = site_k > ctr ? Vₗ * TransferMatrix(state.AR[ctr:(site_k - 1)]) : Vₗ
+        pieces_k = _op_pieces(ops_pv[k], site_k)
+        Vₗ = _transfer_right_mpo(Vₗ, pieces_k[1], state.AR[site_k])
+        Vₗ, ctr = _push_ops!(Vₗ, pieces_k[2:end], state, site_k + 1)
     end
-    Vₗ = _transfer_right_mpo(Vₗ, O₂s[i2], state.AR[i2])
-    ctr = i2 + 1
 
-    # Propagate to i3 and insert O3
-    if i3 > ctr
-        Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(i3 - 1)])
-    end
-    Vₗ = _transfer_right_mpo(Vₗ, O₃s[i3], state.AR[i3])
-    ctr = i3 + 1
-
-    # Propagate to i4 and close with O4
-    if i4 > ctr
-        Vₗ = Vₗ * TransferMatrix(state.AR[ctr:(i4 - 1)])
-    end
-    O₄ = O₄s[i4]
-    return @plansor Vₗ[1 2; 4] * state.AR[i4][4 5; 6] * removeunit(O₄, 4)[2 3; 5] *
-        conj(state.AR[i4][1 3; 6])
+    site_N = sites[N]
+    Vₗ = site_N > ctr ? Vₗ * TransferMatrix(state.AR[ctr:(site_N - 1)]) : Vₗ
+    piecesN   = _op_pieces(ops_pv[N], site_N)
+    last_site = site_N + length(piecesN) - 1
+    Vₗ_mid, _ = _push_ops!(Vₗ, piecesN[1:(end - 1)], state, site_N)
+    ON_last = piecesN[end]
+    return @plansor Vₗ_mid[1 2; 4] * state.AR[last_site][4 5; 6] *
+        removeunit(ON_last, 4)[2 3; 5] * conj(state.AR[last_site][1 3; 6])
 end
