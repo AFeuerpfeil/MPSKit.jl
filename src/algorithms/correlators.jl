@@ -27,6 +27,10 @@ Each operator can be:
 If `connected=true`, subtract the disconnected contribution via the full cumulant expansion
 (inclusion-exclusion over all proper set partitions at the operator level).
 
+If `stable=true` (N=2 single-site operators only), compute the connected 2-point correlator
+via operator centering: replace each operator `O` by `O - <O>` before evaluating, which
+avoids catastrophic cancellation when `<O1 O2> ≈ <O1><O2>`. Incompatible with `connected=true`.
+
 Convenience dispatchers for small N:
 
     correlator(ψ, O, i; connected=false)
@@ -41,9 +45,9 @@ function correlator end
 # -----------------------------------------------------------------------
 function correlator(state::AbstractMPS, args...; kwargs...)
     indices = findall(arg -> arg isa Integer || arg isa AbstractRange, args)
-    ops = setdiff(args, args[indices])
+    ops = setdiff(eachindex(args), indices)
     # return state, tuple(ops...), tuple(args[indices]...)
-    return correlator(state, tuple(ops...), tuple(args[indices]...); kwargs...)
+    return correlator(state, tuple(args[ops]...), tuple(args[indices]...); kwargs...)
 end
 
 # -----------------------------------------------------------------------
@@ -97,15 +101,15 @@ end
 # Set partition utilities for connected (cumulant) correlators
 # -----------------------------------------------------------------------
 
-function _set_partitions(elements::Vector)
-    isempty(elements) && return [Vector{eltype(elements)}[]]
+function _set_partitions(elements::Vector{T}) where {T}
+    isempty(elements) && return Vector{Vector{T}}[Vector{T}[]]
     first_elem = elements[1]
     rest_parts = _set_partitions(elements[2:end])
-    result = []
+    result = Vector{Vector{Vector{T}}}()
     for partition in rest_parts
-        push!(result, [[first_elem]; partition])
-        for (i, _) in enumerate(partition)
-            new_part = copy.(partition)
+        push!(result, pushfirst!(copy(partition), Vector{T}([first_elem])))
+        for i in eachindex(partition)
+            new_part = Vector{Vector{T}}([copy(b) for b in partition])
             push!(new_part[i], first_elem)
             push!(result, new_part)
         end
@@ -118,8 +122,8 @@ function _proper_set_partitions(N::Int)
     return filter(p -> length(p) > 1, _set_partitions(collect(1:N)))
 end
 
-# Möbius sign: (-1)^(|π|+1) * (|π|-1)!
-_partition_sign(π) = (-1)^(length(π) + 1) * factorial(length(π) - 1)
+# Möbius sign: (-1)^|p| * (|p|-1)!
+_partition_sign(p) = (-1)^(length(p)) * factorial(length(p) - 1)
 
 # -----------------------------------------------------------------------
 # Tuple interface: main entry point
@@ -128,9 +132,17 @@ _partition_sign(π) = (-1)^(length(π) + 1) * factorial(length(π) - 1)
 # `ops`  : NTuple of operators
 # `idxs` : entries — first is positions of first piece, rest are distances between consecutive pieces
 # Total length(idxs) == sum of piece counts across all operators.
+function _shift_mpotensor(O::MPOTensor, e)
+    iszero(e) && return O
+    phys = removeunit(removeunit(O, 1), 3)
+    id_phys = e * id(domain(phys))
+    return add_util_leg(phys - id_phys)
+end
+
 function correlator(
         state::AbstractMPS, ops::Tuple, idxs::Tuple;
-        connected::Bool = false, scheduler = Defaults.scheduler[],
+        connected::Bool = false, stable::Bool = false,
+        scheduler = Defaults.scheduler[],
         backend::AbstractBackend = DefaultBackend(), allocator = BufferAllocator()
     )
     L = length(state)
@@ -142,6 +154,29 @@ function correlator(
             "Total operator pieces ($K_total) must equal length(idxs) " *
             "($(length(idxs))). Operator widths: $(Tuple(widths))."
         ))
+
+    if stable
+        length(ops) == 2 && all(==(1), widths) ||
+            throw(ArgumentError("`stable=true` is only supported for N=2 single-site operators."))
+        op1_pa, op2_pa = ops_norm
+        # Compute <O1[s]> and <O2[s]> for each site, then build centred PeriodicArrays.
+        op1_centred = PeriodicArray([
+            _shift_mpotensor(op1_pa[s], _expval_mpotensor(state, op1_pa[s], s, backend, allocator))
+            for s in 1:L
+        ])
+        op2_centred = PeriodicArray([
+            _shift_mpotensor(op2_pa[s], _expval_mpotensor(state, op2_pa[s], s, backend, allocator))
+            for s in 1:L
+        ])
+        # Bypass normalisation: centred operators are already MPOTensors.
+        ops_norm_c = (op1_centred, op2_centred)
+        flat_ops_c = Tuple(Iterators.flatten(_flatten_op(op) for op in ops_norm_c))
+        op_ends_c  = Tuple(cumsum(widths))
+        scalar_mask = map(idx -> idx isa Integer, idxs)
+        idx_ranges  = map(collect, idxs)
+        G = _correlatorN(state, flat_ops_c, idx_ranges, false, ops_norm_c, op_ends_c; scheduler, backend, allocator)
+        return _squeeze(G, scalar_mask)
+    end
 
     # Flatten: each piece of each operator becomes a separate entry.
     flat_ops = Tuple(Iterators.flatten(_flatten_op(op) for op in ops_norm))
@@ -172,6 +207,33 @@ end
 # Output: Array of shape (length(is), length(ds1), …, length(dsK-1)) where K = total pieces.
 # idx_ranges = (is, ds1, …, dsK-1), each an AbstractRange{Int}.
 # ops_norm and op_ends are needed for the connected cumulant correction (operator-level partitions).
+function _build_sub_corr_cache(state, partitions, ops_norm, op_ends, idx_ranges, backend, allocator)
+    T = scalartype(state)
+    cache = Dict{Tuple, T}()
+    N_ops = length(op_ends)
+    # Iterate over all grid points to find every (block, sites) pair that will be needed.
+    for multi_idx in Iterators.product((eachindex(r) for r in idx_ranges)...)
+        flat_sites = _recover_sites_flat(idx_ranges, multi_idx)
+        op_all_sites = Vector{Vector{Int}}(undef, N_ops)
+        prev = 0
+        for k in 1:N_ops
+            op_all_sites[k] = flat_sites[(prev + 1):op_ends[k]]
+            prev = op_ends[k]
+        end
+        for partition in partitions
+            for block in partition
+                key = (Tuple(block), Tuple(Iterators.flatten(op_all_sites[block])))
+                if !haskey(cache, key)
+                    sub_ops   = tuple(ops_norm[block]...)
+                    sub_sites = tuple(op_all_sites[block]...)
+                    cache[key] = _correlator_absolute(state, sub_ops, sub_sites, backend, allocator)
+                end
+            end
+        end
+    end
+    return cache
+end
+
 function _correlatorN(
         state::AbstractMPS, flat_ops_pv, idx_ranges, connected::Bool, ops_norm, op_ends;
         scheduler = Defaults.scheduler[], backend = DefaultBackend(), allocator = BufferAllocator()
@@ -185,8 +247,9 @@ function _correlatorN(
     # Partitions are over original operators, not flat pieces.
     N_ops = length(op_ends)
     partitions = connected ? _proper_set_partitions(N_ops) : nothing
+    sub_corr_cache = connected ? _build_sub_corr_cache(state, partitions, ops_norm, op_ends, idx_ranges, backend, allocator) : nothing
 
-    # @tasks 
+    # @tasks
     for (ii, i) in collect(enumerate(is))
         # @set scheduler = scheduler
         pieces1 = _op_pieces(flat_ops_pv[1], i)
@@ -200,7 +263,7 @@ function _correlatorN(
         Vₗ, ctr = _push_ops!(Vₗ, pieces1[2:end], state, i + 1, backend, allocator)
 
         _fill_G!(G, (ii,), state, flat_ops_pv, idx_ranges, S₁, Vₗ, ctr, 2,
-                 connected, partitions, ops_norm, op_ends, backend, allocator)
+                 connected, partitions, ops_norm, op_ends, sub_corr_cache, backend, allocator)
     end
 
     return G
@@ -212,7 +275,7 @@ end
 # ctr        : next site (one past the last site of flat op depth-1)
 function _fill_G!(
         G, idx_prefix, state, flat_ops_pv, idx_ranges, S₁, Vₗ, ctr, depth,
-        connected, partitions, ops_norm, op_ends, backend, allocator
+        connected, partitions, ops_norm, op_ends, sub_corr_cache, backend, allocator
     )
     N    = length(flat_ops_pv)
     ds_k = idx_ranges[depth]
@@ -257,9 +320,8 @@ function _fill_G!(
                 for partition in partitions
                     sgn = _partition_sign(partition)
                     contrib = prod(partition) do block
-                        sub_ops   = tuple(ops_norm[block]...)
-                        sub_sites = tuple(op_all_sites[block]...)
-                        _correlator_absolute(state, sub_ops, sub_sites, backend, allocator)
+                        key = (Tuple(block), Tuple(Iterators.flatten(op_all_sites[block])))
+                        sub_corr_cache[key]
                     end
                     G[new_idx...] -= sgn * contrib
                 end
@@ -269,7 +331,7 @@ function _fill_G!(
             Vₗ_next = _transfer_right_mpo(Vₗ_k, pieces_k[1], state.AR[site_k], backend, allocator)
             Vₗ_next, ctr_next = _push_ops!(Vₗ_next, pieces_k[2:end], state, site_k + 1, backend, allocator)
             _fill_G!(G, new_idx, state, flat_ops_pv, idx_ranges, S₁, Vₗ_next, ctr_next,
-                     depth + 1, connected, partitions, ops_norm, op_ends, backend, allocator)
+                     depth + 1, connected, partitions, ops_norm, op_ends, sub_corr_cache, backend, allocator)
         end
     end
 end
