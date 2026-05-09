@@ -111,10 +111,11 @@ end
     expected_conn = G3 - G2_12 * ev - G2_13 * ev - G2_23 * ev + 2 * ev^3
     @test G3_conn ≈ expected_conn atol = 1e-8
 
-    # connected=true with multi-site operators: d=2 means O2 starts 2 sites after the last
-    # site of O1 (a 2-site operator), so O1 occupies sites 1-2 and O2 starts at site 4.
-    G_conn_ms = correlator(ψ, (S_z_S_z(), Z_mpo), (1, 2); connected = true)
-    G_full_ms = correlator(ψ, (S_z_S_z(), Z_mpo), (1, 2))
+    # connected=true with multi-site operators: S_z_S_z() decomposes into 2 pieces,
+    # so idxs has 3 slots: piece1 of S_z_S_z at site 1, piece2 at distance 1 (site 2),
+    # Z_mpo at distance 2 (site 4).
+    G_conn_ms = correlator(ψ, (S_z_S_z(), Z_mpo), (1, 1, 2); connected = true)
+    G_full_ms = correlator(ψ, (S_z_S_z(), Z_mpo), (1, 1, 2))
     ev12 = expectation_value(ψ, (1, 2) => S_z_S_z())
     ev4  = expectation_value(ψ, 4 => S_z())
     @test G_conn_ms ≈ G_full_ms - ev12 * ev4 atol = 1e-8
