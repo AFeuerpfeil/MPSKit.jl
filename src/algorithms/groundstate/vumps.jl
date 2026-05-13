@@ -36,7 +36,7 @@ $(TYPEDFIELDS)
 
     sequential::Bool = false
 
-    parallel::Bool = false
+    parallel::Bool = true
 
     prepare::Bool = true
 
