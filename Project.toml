@@ -57,7 +57,7 @@ TensorKitTensors = "0.2"
 TensorOperations = "5.5.1"
 Test = "1"
 TestExtras = "0.3"
-VectorInterface = "0.2, 0.3, 0.4, 0.5"
+VectorInterface = "0.2, 0.3, 0.4, 0.5, 0.6"
 cuTENSOR = "2.3"
 julia = "1.10"
 
