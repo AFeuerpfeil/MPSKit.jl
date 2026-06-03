@@ -1,7 +1,7 @@
 <img src="./docs/src/assets/logo_readme.svg" width="150">
 
 # MPSKit.jl
-
+ 
 Contains code for tackling one-dimensional quantum and two-dimensional statistical mechanics
 problems using tensor network algorithms. The main focus is on matrix product states (MPS)
 and matrix product operators (MPO), both finite and infinite.
