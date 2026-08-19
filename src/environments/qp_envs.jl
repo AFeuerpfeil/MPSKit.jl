@@ -137,7 +137,7 @@ function environments(
         lenvs = environments(exci.left_gs, H, exci.left_gs),
         renvs = istopological(exci) ? environments(exci.right_gs, H, exci.right_gs) : lenvs,
         backend::AbstractBackend = DefaultBackend(), 
-        allocator::AbstractAllocator = default_allocator(exci, SerialScheduler())
+        allocator = default_allocator(exci, SerialScheduler())
     )
     AL = exci.left_gs.AL
     AR = exci.right_gs.AR

@@ -70,13 +70,13 @@ end
 regularize(t::AbstractTransferMatrix, lvec, rvec) = RegTransferMatrix(t, lvec, rvec);
 
 function regularize!(v::MPSBondTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     return @plansor backend = backend allocator = allocator v[-1; -2] -= lvec[1; 2] * v[2; 1] * rvec[-1; -2]
 end
 
 function regularize!(v::MPSTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     return @plansor backend = backend allocator = allocator v[-1 -2; -3] -= lvec[1; 2] * v[2 -2; 1] * rvec[-1; -3]
 end
@@ -84,19 +84,19 @@ end
 function regularize!(
         v::AbstractTensorMap{T, S, 1, 2} where {T, S}, lvec::MPSBondTensor,
         rvec::MPSBondTensor,
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     return @plansor backend = backend allocator = allocator v[-1; -2 -3] -= lvec[1; 2] * v[2; -2 1] * rvec[-1; -3]
 end
 
 function regularize!(v::MPOTensor, lvec::MPSTensor, rvec::MPSTensor, 
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     return @plansor backend = backend allocator = allocator v[-1 -2; -3 -4] -= v[1 2; -3 3] * lvec[3 2; 1] * rvec[-1 -2; -4]
 end
 
 function regularize!(v::MPOTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     λ = @plansor backend = backend allocator = allocator lvec[2; 1] * removeunit(removeunit(v, 3), 2)[1; 2]
     return add!(v, insertleftunit(insertrightunit(rvec, 1; dual = isdual(space(v, 2))), 3), -λ)

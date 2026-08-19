@@ -351,7 +351,7 @@ function effective_excitation_hamiltonian(H::MultilineMPO, ϕ::MultilineQP, envs
 end
 
 function _effective_excitation_local_apply(site, ϕ, H::MPOHamiltonian, E::Number, envs;
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     B = ϕ[site]
     GL = leftenv(envs.leftenvs, site, ϕ.left_gs)
@@ -402,7 +402,7 @@ function _effective_excitation_local_apply(site, ϕ, H::MPO, E::Number, envs;
 end
 
 function effective_excitation_renormalization_energy(H, ϕ, lenvs, renvs;
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     ψ_left = ϕ.left_gs
     ψ_right = ϕ.right_gs
