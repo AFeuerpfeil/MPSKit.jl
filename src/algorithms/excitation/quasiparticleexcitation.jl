@@ -317,7 +317,7 @@ function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultA
     qp_envs = environments(ϕ, H.operator, ϕ, alg_environments; lenvs = H.lenvs, renvs = H.renvs,
         backend = H.backend
     )
-    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = H.backend, allocator = H.loc_allocator)
+    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = H.backend)
 end
 function (H::Multiline{<:EffectiveExcitationHamiltonian})(
         ϕ::MultilineQP, alg_environments = DefaultAlgorithm(),
