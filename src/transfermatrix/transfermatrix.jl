@@ -59,11 +59,15 @@ end;
 # constructors
 TransferMatrix(a) = TransferMatrix(a, nothing, a);
 TransferMatrix(a, b) = TransferMatrix(a, nothing, b);
-function TransferMatrix(a::AbstractTensorMap, b, c::AbstractTensorMap, isflipped = false)
-    return SingleTransferMatrix(a, b, c, isflipped)
+function TransferMatrix(a::AbstractTensorMap, b, c::AbstractTensorMap, isflipped = false, 
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    return SingleTransferMatrix(a, b, c, isflipped, backend, allocator)
 end
-function TransferMatrix(a::AbstractVector, b, c::AbstractVector, isflipped = false)
-    tot = ProductTransferMatrix(convert(Vector, TransferMatrix.(a, b, c)))
+function TransferMatrix(a::AbstractVector, b, c::AbstractVector, isflipped = false,
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    tot = ProductTransferMatrix(convert(Vector, TransferMatrix.(a, b, c, false, backend, allocator)))
     return isflipped ? flip(tot) : tot
 end
 
