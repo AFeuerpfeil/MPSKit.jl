@@ -60,12 +60,12 @@ end;
 TransferMatrix(a) = TransferMatrix(a, nothing, a);
 TransferMatrix(a, b) = TransferMatrix(a, nothing, b);
 function TransferMatrix(a::AbstractTensorMap, b, c::AbstractTensorMap, isflipped = false, 
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     return SingleTransferMatrix(a, b, c, isflipped, backend, allocator)
 end
 function TransferMatrix(a::AbstractVector, b, c::AbstractVector, isflipped = false,
-        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
     tot = ProductTransferMatrix(convert(Vector, TransferMatrix.(a, b, c, false, backend, allocator)))
     return isflipped ? flip(tot) : tot
