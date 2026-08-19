@@ -136,8 +136,7 @@ function environments(
         exci::FiniteQP, H::FiniteMPOHamiltonian, above = exci, alg = nothing;
         lenvs = environments(exci.left_gs, H, exci.left_gs),
         renvs = istopological(exci) ? environments(exci.right_gs, H, exci.right_gs) : lenvs,
-        backend::AbstractBackend = DefaultBackend(), 
-        allocator = default_allocator(exci, SerialScheduler())
+        backend::AbstractBackend = DefaultBackend(),
     )
     AL = exci.left_gs.AL
     AR = exci.right_gs.AR
@@ -147,18 +146,25 @@ function environments(
     lBs = PeriodicVector([allocate_GBL(exci, H, exci, i) for i in 1:length(exci)])
     rBs = PeriodicVector([allocate_GBR(exci, H, exci, i) for i in 1:length(exci)])
 
-    zerovector!(lBs[1])
-    for pos in 1:(length(exci) - 1)
-        lBs[pos + 1] = lBs[pos] * TransferMatrix(AR[pos], H[pos], AL[pos]; backend = backend, allocator = allocator)
-        lBs[pos + 1] += leftenv(lenvs, pos, exci.left_gs) *
-            TransferMatrix(exci[pos], H[pos], AL[pos]; backend = backend, allocator = allocator)
-    end
-
-    zerovector!(rBs[end])
-    for pos in length(exci):-1:2
-        rBs[pos - 1] = TransferMatrix(AL[pos], H[pos], AR[pos]; backend = backend, allocator = allocator) * rBs[pos]
-        rBs[pos - 1] += TransferMatrix(exci[pos], H[pos], AR[pos]; backend = backend, allocator = allocator) *
-            rightenv(renvs, pos, exci.right_gs)
+    @sync begin
+        @spawn begin
+            allocator1 = default_allocator(exci, SerialScheduler())
+            zerovector!(lBs[1])
+            for pos in 1:(length(exci) - 1)
+                lBs[pos + 1] = lBs[pos] * TransferMatrix(AR[pos], H[pos], AL[pos]; backend = backend, allocator = allocator1)
+                lBs[pos + 1] += leftenv(lenvs, pos, exci.left_gs) *
+                    TransferMatrix(exci[pos], H[pos], AL[pos]; backend = backend, allocator = allocator1)
+            end
+        end
+        @spawn begin
+            allocator2 = default_allocator(exci, SerialScheduler())
+            zerovector!(rBs[end])
+            for pos in length(exci):-1:2
+                rBs[pos - 1] = TransferMatrix(AL[pos], H[pos], AR[pos]; backend = backend, allocator = allocator2) * rBs[pos]
+                rBs[pos - 1] += TransferMatrix(exci[pos], H[pos], AR[pos]; backend = backend, allocator = allocator2) *
+                    rightenv(renvs, pos, exci.right_gs)
+            end
+        end
     end
 
     return InfiniteQPEnvironments(lBs, rBs, lenvs, renvs)

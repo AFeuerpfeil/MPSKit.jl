@@ -295,22 +295,19 @@ end
 #                                H_eff                                         #
 ################################################################################
 
-struct EffectiveExcitationHamiltonian{TO, TGL, TGR, E, B, A1, A2}
+struct EffectiveExcitationHamiltonian{TO, TGL, TGR, E, B}
     operator::TO
     lenvs::TGL
     renvs::TGR
     energy::E
-    backend::B 
-    env_allocator::A1 
-    loc_allocator::A2
+    backend::B
 end
 function EffectiveExcitationHamiltonian(
         operator, lenvs, renvs, energy;
-        backend = Defaults.backend(), env_allocator = DefaultAllocator(),
-        loc_allocator = default_allocator(operator, Defaults.scheduler[])
+        backend = Defaults.backend()
     )
     return EffectiveExcitationHamiltonian(
-        operator, lenvs, renvs, energy, backend, env_allocator, loc_allocator
+        operator, lenvs, renvs, energy, backend
     )
 end
 # to allow Multiline checks
@@ -318,7 +315,7 @@ Base.length(H::EffectiveExcitationHamiltonian) = length(H.operator)
 
 function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultAlgorithm())
     qp_envs = environments(ϕ, H.operator, ϕ, alg_environments; lenvs = H.lenvs, renvs = H.renvs,
-        backend = H.backend, allocator = H.env_allocator
+        backend = H.backend
     )
     return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = H.backend, allocator = H.loc_allocator)
 end
@@ -334,7 +331,7 @@ function effective_excitation_hamiltonian(H, ϕ, envs = environments(ϕ, H),
     return effective_excitation_hamiltonian(H, ϕ, envs, E₀; backend = backend)
 end
 function effective_excitation_hamiltonian(H, ϕ, qp_envs, E;
-        backend::AbstractBackend = DefaultBackend(), allocator = default_allocator(H, Defaults.scheduler[])
+        backend::AbstractBackend = DefaultBackend(), allocator = default_allocator(ϕ, Defaults.scheduler[])
     )
     ϕ′ = similar(ϕ)
     tforeach(1:length(ϕ); scheduler = Defaults.scheduler[]) do loc
