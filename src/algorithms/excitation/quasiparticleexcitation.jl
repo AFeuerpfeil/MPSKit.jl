@@ -339,7 +339,7 @@ function effective_excitation_hamiltonian(H, ϕ, qp_envs, E;
     ϕ′ = similar(ϕ)
     tforeach(1:length(ϕ); scheduler = Defaults.scheduler[]) do loc
         ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, E[loc], qp_envs;
-            backend = H.backend, allocator = allocator
+            backend = backend, allocator = allocator
         )
         return nothing
     end
