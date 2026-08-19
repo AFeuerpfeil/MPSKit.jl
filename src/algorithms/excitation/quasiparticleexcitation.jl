@@ -295,20 +295,32 @@ end
 #                                H_eff                                         #
 ################################################################################
 
-struct EffectiveExcitationHamiltonian{TO, TGL, TGR, E}
+struct EffectiveExcitationHamiltonian{TO, TGL, TGR, E, B, A1, A2}
     operator::TO
     lenvs::TGL
     renvs::TGR
     energy::E
+    backend::B 
+    env_allocator::A1 
+    loc_allocator::A2
+end
+function EffectiveExcitationHamiltonian(
+        operator, lenvs, renvs, energy;
+        backend = Defaults.backend(), env_allocator = DefaultAllocator(),
+        loc_allocator = default_allocator(operator, Defaults.scheduler[])
+    )
+    return EffectiveExcitationHamiltonian(
+        operator, lenvs, renvs, energy, backend, env_allocator, loc_allocator
+    )
 end
 # to allow Multiline checks
 Base.length(H::EffectiveExcitationHamiltonian) = length(H.operator)
 
-function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultAlgorithm(),
-        backend::AbstractBackend = DefaultBackend()
+function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultAlgorithm())
+    qp_envs = environments(ϕ, H.operator, ϕ, alg_environments; lenvs = H.lenvs, renvs = H.renvs,
+        backend = H.backend, allocator = H.env_allocator
     )
-    qp_envs = environments(ϕ, H.operator, ϕ, alg_environments; lenvs = H.lenvs, renvs = H.renvs)
-    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = backend)
+    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = H.backend, allocator = H.loc_allocator)
 end
 function (H::Multiline{<:EffectiveExcitationHamiltonian})(
         ϕ::MultilineQP, alg_environments = DefaultAlgorithm(),
@@ -322,13 +334,12 @@ function effective_excitation_hamiltonian(H, ϕ, envs = environments(ϕ, H),
     return effective_excitation_hamiltonian(H, ϕ, envs, E₀; backend = backend)
 end
 function effective_excitation_hamiltonian(H, ϕ, qp_envs, E;
-        backend::AbstractBackend = DefaultBackend()
+        backend::AbstractBackend = DefaultBackend(), allocator = default_allocator(H, Defaults.scheduler[])
     )
     ϕ′ = similar(ϕ)
-    allocator = default_allocator(ϕ, Defaults.scheduler[])
     tforeach(1:length(ϕ); scheduler = Defaults.scheduler[]) do loc
         ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, E[loc], qp_envs;
-            backend = backend, allocator = allocator
+            backend = H.backend, allocator = allocator
         )
         return nothing
     end
@@ -351,7 +362,7 @@ function effective_excitation_hamiltonian(H::MultilineMPO, ϕ::MultilineQP, envs
 end
 
 function _effective_excitation_local_apply(site, ϕ, H::MPOHamiltonian, E::Number, envs;
-        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
+        backend::AbstractBackend = DefaultBackend(), allocator = default_allocator(H, Defaults.scheduler[])
     )
     B = ϕ[site]
     GL = leftenv(envs.leftenvs, site, ϕ.left_gs)
