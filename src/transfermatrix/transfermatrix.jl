@@ -1,12 +1,14 @@
 abstract type AbstractTransferMatrix end;
 
 # single site transfer
-struct SingleTransferMatrix{A <: AbstractTensorMap, B, C <: AbstractTensorMap} <:
+struct SingleTransferMatrix{A <: AbstractTensorMap, B, C <: AbstractTensorMap, Ba, Al} <:
     AbstractTransferMatrix
     above::A
     middle::B
     below::C
     isflipped::Bool
+    backend::Ba 
+    allocator::Al
 end
 
 #the product of transfer matrices is its own type
@@ -34,7 +36,7 @@ end
 
 #flip em
 function TensorKit.flip(tm::SingleTransferMatrix)
-    return SingleTransferMatrix(tm.above, tm.middle, tm.below, !tm.isflipped)
+    return SingleTransferMatrix(tm.above, tm.middle, tm.below, !tm.isflipped, tm.backend, tm.allocator)
 end;
 TensorKit.flip(tm::ProductTransferMatrix) = ProductTransferMatrix(flip.(reverse(tm.tms)));
 TensorKit.flip(tm::RegTransferMatrix) = RegTransferMatrix(flip(tm.tm), tm.rvec, tm.lvec);
@@ -47,12 +49,12 @@ Base.:*(vec, tm::AbstractTransferMatrix) = flip(tm)(vec);
 (d::ProductTransferMatrix)(vec) = foldr((a, b) -> a(b), d.tms; init = vec);
 function (d::SingleTransferMatrix)(vec)
     return if d.isflipped
-        transfer_left(vec, d.middle, d.above, d.below)
+        transfer_left(vec, d.middle, d.above, d.below, d.backend, d.allocator)
     else
-        transfer_right(vec, d.middle, d.above, d.below)
+        transfer_right(vec, d.middle, d.above, d.below, d.backend, d.allocator)
     end
 end;
-(d::RegTransferMatrix)(vec) = regularize!(d.tm * vec, d.lvec, d.rvec);
+(d::RegTransferMatrix)(vec) = regularize!(d.tm * vec, d.lvec, d.rvec, d.tm.backend, d.tm.allocator);
 
 # constructors
 TransferMatrix(a) = TransferMatrix(a, nothing, a);
@@ -67,26 +69,35 @@ end
 
 regularize(t::AbstractTransferMatrix, lvec, rvec) = RegTransferMatrix(t, lvec, rvec);
 
-function regularize!(v::MPSBondTensor, lvec::MPSBondTensor, rvec::MPSBondTensor)
-    return @plansor v[-1; -2] -= lvec[1; 2] * v[2; 1] * rvec[-1; -2]
+function regularize!(v::MPSBondTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    return @plansor backend = backend allocator = allocator v[-1; -2] -= lvec[1; 2] * v[2; 1] * rvec[-1; -2]
 end
 
-function regularize!(v::MPSTensor, lvec::MPSBondTensor, rvec::MPSBondTensor)
-    return @plansor v[-1 -2; -3] -= lvec[1; 2] * v[2 -2; 1] * rvec[-1; -3]
+function regularize!(v::MPSTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    return @plansor backend = backend allocator = allocator v[-1 -2; -3] -= lvec[1; 2] * v[2 -2; 1] * rvec[-1; -3]
 end
 
 function regularize!(
         v::AbstractTensorMap{T, S, 1, 2} where {T, S}, lvec::MPSBondTensor,
-        rvec::MPSBondTensor
+        rvec::MPSBondTensor,
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
     )
-    return @plansor v[-1; -2 -3] -= lvec[1; 2] * v[2; -2 1] * rvec[-1; -3]
+    return @plansor backend = backend allocator = allocator v[-1; -2 -3] -= lvec[1; 2] * v[2; -2 1] * rvec[-1; -3]
 end
 
-function regularize!(v::MPOTensor, lvec::MPSTensor, rvec::MPSTensor)
-    return @plansor v[-1 -2; -3 -4] -= v[1 2; -3 3] * lvec[3 2; 1] * rvec[-1 -2; -4]
+function regularize!(v::MPOTensor, lvec::MPSTensor, rvec::MPSTensor, 
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    return @plansor backend = backend allocator = allocator v[-1 -2; -3 -4] -= v[1 2; -3 3] * lvec[3 2; 1] * rvec[-1 -2; -4]
 end
 
-function regularize!(v::MPOTensor, lvec::MPSBondTensor, rvec::MPSBondTensor)
-    λ = @plansor lvec[2; 1] * removeunit(removeunit(v, 3), 2)[1; 2]
+function regularize!(v::MPOTensor, lvec::MPSBondTensor, rvec::MPSBondTensor,
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
+    λ = @plansor backend = backend allocator = allocator lvec[2; 1] * removeunit(removeunit(v, 3), 2)[1; 2]
     return add!(v, insertleftunit(insertrightunit(rvec, 1; dual = isdual(space(v, 2))), 3), -λ)
 end

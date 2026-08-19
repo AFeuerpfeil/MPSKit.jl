@@ -28,19 +28,23 @@ Used as the `algorithm` argument of [`excitations`](@ref).
 
 * [Haegeman et al. Phys. Rev. Let. 111 (2013)](@cite haegeman2013)
 """
-struct QuasiparticleAnsatz{A, E} <: Algorithm
+struct QuasiparticleAnsatz{A, E, B} <: Algorithm
     "algorithm used for the eigenvalue solvers"
     alg::A
 
     "algorithm used for the quasiparticle environments"
     alg_environments::E
+
+    "backend for tensor contractions and index manipulations"
+    backend::B
 end
 function QuasiparticleAnsatz(;
         alg_environments = Defaults.alg_environments(; dynamic_tols = false),
+        backend = Defaults.backend(),
         kwargs...
     )
     alg = Defaults.alg_eigsolve(; dynamic_tols = false, kwargs...)
-    return QuasiparticleAnsatz(alg, alg_environments)
+    return QuasiparticleAnsatz(alg, alg_environments, backend)
 end
 
 ################################################################################
@@ -300,24 +304,32 @@ end
 # to allow Multiline checks
 Base.length(H::EffectiveExcitationHamiltonian) = length(H.operator)
 
-function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultAlgorithm())
+function (H::EffectiveExcitationHamiltonian)(ϕ::QP, alg_environments = DefaultAlgorithm(),
+        backend::AbstractBackend = DefaultBackend()
+    )
     qp_envs = environments(ϕ, H.operator, ϕ, alg_environments; lenvs = H.lenvs, renvs = H.renvs)
-    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy)
+    return effective_excitation_hamiltonian(H.operator, ϕ, qp_envs, H.energy; backend = backend)
 end
 function (H::Multiline{<:EffectiveExcitationHamiltonian})(
-        ϕ::MultilineQP, alg_environments = DefaultAlgorithm()
+        ϕ::MultilineQP, alg_environments = DefaultAlgorithm(),
     )
     return Multiline(map((x, y) -> x(y, alg_environments), parent(H), parent(ϕ)))
 end
 
-function effective_excitation_hamiltonian(H, ϕ, envs = environments(ϕ, H))
-    E₀ = effective_excitation_renormalization_energy(H, ϕ, envs.leftenvs, envs.rightenvs)
-    return effective_excitation_hamiltonian(H, ϕ, envs, E₀)
+function effective_excitation_hamiltonian(H, ϕ, envs = environments(ϕ, H),
+        backend::AbstractBackend = DefaultBackend())
+    E₀ = effective_excitation_renormalization_energy(H, ϕ, envs.leftenvs, envs.rightenvs; backend = backend)
+    return effective_excitation_hamiltonian(H, ϕ, envs, E₀; backend = backend)
 end
-function effective_excitation_hamiltonian(H, ϕ, qp_envs, E)
+function effective_excitation_hamiltonian(H, ϕ, qp_envs, E;
+        backend::AbstractBackend = DefaultBackend()
+    )
     ϕ′ = similar(ϕ)
+    allocator = default_allocator(ϕ, Defaults.scheduler[])
     tforeach(1:length(ϕ); scheduler = Defaults.scheduler[]) do loc
-        ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, E[loc], qp_envs)
+        ϕ′[loc] = _effective_excitation_local_apply(loc, ϕ, H, E[loc], qp_envs;
+            backend = backend, allocator = allocator
+        )
         return nothing
     end
     return ϕ′
@@ -338,7 +350,9 @@ function effective_excitation_hamiltonian(H::MultilineMPO, ϕ::MultilineQP, envs
     )
 end
 
-function _effective_excitation_local_apply(site, ϕ, H::MPOHamiltonian, E::Number, envs)
+function _effective_excitation_local_apply(site, ϕ, H::MPOHamiltonian, E::Number, envs;
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
     B = ϕ[site]
     GL = leftenv(envs.leftenvs, site, ϕ.left_gs)
     GR = rightenv(envs.rightenvs, site, ϕ.right_gs)
@@ -347,26 +361,28 @@ function _effective_excitation_local_apply(site, ϕ, H::MPOHamiltonian, E::Numbe
     B′ = scale(B, -E)
 
     # B in center
-    @plansor B′[-1 -2; -3 -4] += GL[-1 5; 4] * B[4 2; -3 1] * H[site][5 -2; 2 3] * GR[1 3; -4]
+    @plansor backend = backend allocator = allocator B′[-1 -2; -3 -4] += GL[-1 5; 4] * B[4 2; -3 1] * H[site][5 -2; 2 3] * GR[1 3; -4]
 
     # B to the left
     if site > 1 || ϕ isa InfiniteQP
         AR = ϕ.right_gs.AR[site]
         GBL = envs.leftBenvs[site]
-        @plansor B′[-1 -2; -3 -4] += GBL[-1 4; -3 5] * AR[5 2; 1] * H[site][4 -2; 2 3] * GR[1 3; -4]
+        @plansor backend = backend allocator = allocator B′[-1 -2; -3 -4] += GBL[-1 4; -3 5] * AR[5 2; 1] * H[site][4 -2; 2 3] * GR[1 3; -4]
     end
 
     # B to the right
     if site < length(ϕ.left_gs) || ϕ isa InfiniteQP
         AL = ϕ.left_gs.AL[site]
         GBR = envs.rightBenvs[site]
-        @plansor B′[-1 -2; -3 -4] += GL[-1 2; 1] * AL[1 3; 4] * H[site][2 -2; 3 5] * GBR[4 5; -3 -4]
+        @plansor backend = backend allocator = allocator B′[-1 -2; -3 -4] += GL[-1 2; 1] * AL[1 3; 4] * H[site][2 -2; 3 5] * GBR[4 5; -3 -4]
     end
 
     return B′
 end
 
-function _effective_excitation_local_apply(site, ϕ, H::MPO, E::Number, envs)
+function _effective_excitation_local_apply(site, ϕ, H::MPO, E::Number, envs;
+        backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
+    )
     left_gs = ϕ.left_gs
     right_gs = ϕ.right_gs
 
@@ -374,28 +390,32 @@ function _effective_excitation_local_apply(site, ϕ, H::MPO, E::Number, envs)
     GL = leftenv(envs.leftenvs, site, ϕ.left_gs)
     GR = rightenv(envs.rightenvs, site, ϕ.right_gs)
 
-    @plansor T[-1 -2; -3 -4] := GL[-1 5; 4] * B[4 2; -3 1] * H[site][5 -2; 2 3] * GR[1 3; -4]
+    @plansor backend = backend allocator = allocator T[-1 -2; -3 -4] := GL[-1 5; 4] * B[4 2; -3 1] * H[site][5 -2; 2 3] * GR[1 3; -4]
 
-    @plansor T[-1 -2; -3 -4] += envs.leftBenvs[site][-1 4; -3 5] *
+    @plansor backend = backend allocator = allocator T[-1 -2; -3 -4] += envs.leftBenvs[site][-1 4; -3 5] *
         right_gs.AR[site][5 2; 1] * H[site][4 -2; 2 3] * GR[1 3; -4]
 
-    @plansor T[-1 -2; -3 -4] += GL[-1 2; 1] * left_gs.AL[site][1 3; 4] *
+    @plansor backend = backend allocator = allocator T[-1 -2; -3 -4] += GL[-1 2; 1] * left_gs.AL[site][1 3; 4] *
         H[site][2 -2; 3 5] * envs.rightBenvs[site][4 5; -3 -4]
 
     return scale!(T, inv(E))
 end
 
-function effective_excitation_renormalization_energy(H, ϕ, lenvs, renvs)
+function effective_excitation_renormalization_energy(H, ϕ, lenvs, renvs;
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
+    )
     ψ_left = ϕ.left_gs
     ψ_right = ϕ.right_gs
     E = Vector{scalartype(ϕ)}(undef, length(ϕ))
     for i in eachindex(E)
         E[i] = contract_mpo_expval(
-            ψ_left.AC[i], leftenv(lenvs, i, ψ_left), H[i], rightenv(lenvs, i, ψ_left)
+            ψ_left.AC[i], leftenv(lenvs, i, ψ_left), H[i], rightenv(lenvs, i, ψ_left);
+            backend = backend, allocator = allocator
         )
         if istopological(ϕ)
             E[i] += contract_mpo_expval(
-                ψ_right.AC[i], leftenv(renvs, i, ψ_right), H[i], rightenv(renvs, i, ψ_right)
+                ψ_right.AC[i], leftenv(renvs, i, ψ_right), H[i], rightenv(renvs, i, ψ_right);
+                backend = backend, allocator = allocator
             )
             E[i] /= 2
         end

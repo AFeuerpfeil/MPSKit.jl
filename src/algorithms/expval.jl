@@ -94,9 +94,10 @@ end
 # MPOHamiltonian
 # --------------
 function contract_mpo_expval(
-        AC::MPSTensor, GL::MPSTensor, O::MPOTensor, GR::MPSTensor, ACbar::MPSTensor = AC
+        AC::MPSTensor, GL::MPSTensor, O::MPOTensor, GR::MPSTensor, ACbar::MPSTensor = AC;
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
     )
-    return @plansor GL[1 2; 3] * AC[3 7; 5] * GR[5 8; 6] * O[2 4; 7 8] * conj(ACbar[1 4; 6])
+    return @plansor backend = backend allocator = allocator GL[1 2; 3] * AC[3 7; 5] * GR[5 8; 6] * O[2 4; 7 8] * conj(ACbar[1 4; 6])
 end
 # generic fallback
 function contract_mpo_expval(AC, GL, O, GR, ACbar = AC)
@@ -105,22 +106,24 @@ end
 
 function contract_mpo_expval1(AC::MPSTensor, O::AbstractTensorMap, ACbar::MPSTensor = AC)
     numin(O) == numout(O) == 1 || throw(ArgumentError("O is not a single-site operator"))
-    return @plansor conj(ACbar[2 3; 4]) * O[3; 1] * AC[2 1; 4]
+    return @plansor backend = backend allocator = allocator conj(ACbar[2 3; 4]) * O[3; 1] * AC[2 1; 4]
 end
 function contract_mpo_expval1(
         AC::GenericMPSTensor{S, 3}, O::AbstractTensorMap{<:Any, S},
-        ACbar::GenericMPSTensor{S, 3} = AC
+        ACbar::GenericMPSTensor{S, 3} = AC;
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
     ) where {S}
     numin(O) == numout(O) == 1 || throw(ArgumentError("O is not a single-site operator"))
-    return @plansor conj(ACbar[2 3 4; 5]) * O[3; 1] * AC[2 1 4; 5]
+    return @plansor backend = backend allocator = allocator conj(ACbar[2 3 4; 5]) * O[3; 1] * AC[2 1 4; 5]
 end
 
 function contract_mpo_expval2(
         A1::MPSTensor, A2::MPSTensor, O::AbstractTensorMap,
-        A1bar::MPSTensor = A1, A2bar::MPSTensor = A2
+        A1bar::MPSTensor = A1, A2bar::MPSTensor = A2;
+        backend::AbstractBackend = DefaultBackend(), allocator::AbstractAllocator = DefaultAllocator()
     )
     numin(O) == numout(O) == 2 || throw(ArgumentError("O is not a two-site operator"))
-    return @plansor conj(A1bar[4 5; 6]) * conj(A2bar[6 7; 8]) * O[5 7; 2 3] * A1[4 2; 1] *
+    return @plansor backend = backend allocator = allocator conj(A1bar[4 5; 6]) * conj(A2bar[6 7; 8]) * O[5 7; 2 3] * A1[4 2; 1] *
         A2[1 3; 8]
 end
 function contract_mpo_expval2(
@@ -129,7 +132,7 @@ function contract_mpo_expval2(
         A1bar::GenericMPSTensor{S, 3} = A1, A2bar::GenericMPSTensor{S, 3} = A2
     ) where {S}
     numin(O) == numout(O) == 2 || throw(ArgumentError("O is not a two-site operator"))
-    return @plansor conj(A1bar[8 3 4; 11]) * conj(A2bar[11 12 13; 14]) * τ[9 6; 1 2] *
+    return @plansor backend = backend allocator = allocator conj(A1bar[8 3 4; 11]) * conj(A2bar[11 12 13; 14]) * τ[9 6; 1 2] *
         τ[3 4; 9 10] * A1[8 1 2; 5] * A2[5 7 13; 14] * O[10 12; 6 7]
 end
 
