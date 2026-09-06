@@ -67,7 +67,12 @@ end
 function TransferMatrix(a::AbstractVector, b, c::AbstractVector, isflipped = false;
         backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
-    tot = ProductTransferMatrix(convert(Vector, map(x-> TransferMatrix(x..., isflipped; backend = backend, allocator = allocator), zip(a, b, c))))
+    # `b === nothing` (bare AL/AR transfer, no MPO) can't be `zip`ped directly: `Nothing`
+    # doesn't support `iterate`, and `map` over a `Zip` tries to compute its `length` up
+    # front, which fails immediately on a `Nothing` operand. `Iterators.repeated(nothing)`
+    # is infinite, so `zip` correctly truncates to the length of `a`/`c` instead.
+    bs = b === nothing ? Iterators.repeated(nothing) : b
+    tot = ProductTransferMatrix(convert(Vector, map(x-> TransferMatrix(x..., isflipped; backend = backend, allocator = allocator), zip(a, bs, c))))
     return isflipped ? flip(tot) : tot
 end
 
