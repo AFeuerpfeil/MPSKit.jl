@@ -67,7 +67,7 @@ end
 function TransferMatrix(a::AbstractVector, b, c::AbstractVector, isflipped = false;
         backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator()
     )
-    tot = ProductTransferMatrix(convert(Vector, map(x-> TransferMatrix(x, b, c, isflipped; backend = backend, allocator = allocator), zip(a, b, c))))
+    tot = ProductTransferMatrix(convert(Vector, map(x-> TransferMatrix(x..., isflipped; backend = backend, allocator = allocator), zip(a, b, c))))
     return isflipped ? flip(tot) : tot
 end
 
