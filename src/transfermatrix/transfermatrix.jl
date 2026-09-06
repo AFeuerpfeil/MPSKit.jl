@@ -54,7 +54,15 @@ function (d::SingleTransferMatrix)(vec)
         transfer_right(vec, d.middle, d.above, d.below, d.backend, d.allocator)
     end
 end;
-(d::RegTransferMatrix)(vec) = regularize!(d.tm * vec, d.lvec, d.rvec, d.tm.backend, d.tm.allocator);
+# `ProductTransferMatrix` has no `backend`/`allocator` of its own (only the `SingleTransferMatrix`s
+# it's built from do); fall back to the first constituent's, matching how they're all
+# constructed with the same shared `backend`/`allocator` in `TransferMatrix(::AbstractVector, ...)`.
+_backend(tm::SingleTransferMatrix) = tm.backend
+_backend(tm::ProductTransferMatrix) = _backend(first(tm.tms))
+_allocator(tm::SingleTransferMatrix) = tm.allocator
+_allocator(tm::ProductTransferMatrix) = _allocator(first(tm.tms))
+
+(d::RegTransferMatrix)(vec) = regularize!(d.tm * vec, d.lvec, d.rvec, _backend(d.tm), _allocator(d.tm));
 
 # constructors
 TransferMatrix(a) = TransferMatrix(a, nothing, a);
