@@ -191,32 +191,35 @@ function _localupdate_vumps_step!(
         backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator(),
         parallel::Bool = true, scheduler = Defaults.scheduler[],
     )
-    local AC, C
     function AC_step(timeroutput)
+        local AC
         @timeit timeroutput "AC_eigsolve" begin
             Hac = AC_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
             _, AC = fixedpoint(Hac, AC₀, which, alg_eigsolve)
         end
-        return nothing
+        return AC
     end
     function C_step(timeroutput)
+        local C
         @timeit timeroutput "C_eigsolve" begin
             Hc = C_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
             _, C = fixedpoint(Hc, C₀, which, alg_eigsolve)
         end
-        return nothing
+        return C
     end
 
     if parallel
         # TimerOutputs are not thread-safe: give each task its own and merge afterwards
         sub_timeroutputs = [TimerOutput(), TimerOutput()]
+        results = Vector{Any}(undef, 2)
         tforeach(1:2; scheduler) do i
-            i == 1 ? AC_step(sub_timeroutputs[1]) : C_step(sub_timeroutputs[2])
+            results[i] = i == 1 ? AC_step(sub_timeroutputs[1]) : C_step(sub_timeroutputs[2])
         end
         timeroutput.enabled && foreach(sub -> merge!(timeroutput, sub), sub_timeroutputs)
+        AC, C = results
     else
-        AC_step(timeroutput)
-        C_step(timeroutput)
+        AC = AC_step(timeroutput)
+        C = C_step(timeroutput)
     end
     return regauge!(AC, C; alg = alg_orth)
 end
