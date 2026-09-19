@@ -40,6 +40,12 @@ Used as the `algorithm` argument of [`find_groundstate`](@ref) and [`leading_bou
 
     "backend for tensor contractions and index manipulations"
     backend::B = Defaults.backend()
+
+    "run the `AC` and `C` fixed-point (eigensolver) steps of each site in parallel"
+    parallel::Bool = true
+
+    "update the sites one at a time, regauging the MPS and recalculating the environments after each site"
+    sequential::Bool = false
 end
 
 # Internal state of the VUMPS algorithm
@@ -102,9 +108,13 @@ end
 
 function Base.iterate(it::IterativeSolver{<:VUMPS}, state = it.state)
     timeroutput = state.timeroutput
-    ACs = @timeit timeroutput "localupdate (parallel)" localupdate_step!(it, state)
-    mps = @timeit timeroutput "gauge" gauge_step!(it, state, ACs)
-    envs = @timeit timeroutput "envs (parallel)" envs_step!(it, state, mps)
+    if it.sequential
+        mps, envs = sequential_step!(it, state)
+    else
+        ACs = @timeit timeroutput "localupdate (parallel)" localupdate_step!(it, state)
+        mps = @timeit timeroutput "gauge" gauge_step!(it, state, ACs)
+        envs = @timeit timeroutput "envs (parallel)" envs_step!(it, state, mps)
+    end
 
     # finalizer step
     mps, envs = @timeit timeroutput "finalize" it.finalize(
@@ -124,8 +134,27 @@ function Base.iterate(it::IterativeSolver{<:VUMPS}, state = it.state)
     return (mps, envs, ϵ), it.state
 end
 
+# Update the sites one by one, regauging the MPS and recalculating the environments
+# after each site before moving on to the next one.
+function sequential_step!(it::IterativeSolver{<:VUMPS}, state)
+    timeroutput = state.timeroutput
+    mps, envs = state.mps, state.envs
+    for site in eachsite(mps)
+        substate = VUMPSState(
+            mps, state.operator, envs, state.iter, state.ϵ, state.which, timeroutput
+        )
+        ACs = @timeit timeroutput "localupdate" localupdate_step!(
+            it, substate; sites = (site,)
+        )
+        mps = @timeit timeroutput "gauge" gauge_step!(it, substate, ACs)
+        envs = @timeit timeroutput "envs" envs_step!(it, substate, mps)
+    end
+    return mps, envs
+end
+
 function localupdate_step!(
-        it::IterativeSolver{<:VUMPS}, state, scheduler = Defaults.scheduler[]
+        it::IterativeSolver{<:VUMPS}, state, scheduler = Defaults.scheduler[];
+        sites = eachsite(state.mps)
     )
     alg_gauge = adapt_solver(it.alg_gauge; iter = state.iter, g_global = state.ϵ)
     alg_eigsolve = adapt_solver(it.alg_eigsolve; iter = state.iter, g_global = state.ϵ)
@@ -139,12 +168,13 @@ function localupdate_step!(
 
     tree_point = String[section.name for section in state.timeroutput.timer_stack]
     allocator = default_allocator(mps, scheduler)
-    tforeach(eachsite(mps); scheduler) do site
+    tforeach(sites; scheduler) do site
         sub_timeroutput = TimerOutput()
         dst_ACs[site] = _localupdate_vumps_step!(
             site, mps, state.operator, state.envs, src_ACs[site], src_Cs[site];
             alg_orth, state.which, alg_eigsolve,
             timeroutput = sub_timeroutput, it.backend, allocator,
+            it.parallel, scheduler,
         )
         state.timeroutput.enabled &&
             merge!(state.timeroutput, sub_timeroutput; tree_point)
@@ -159,15 +189,34 @@ function _localupdate_vumps_step!(
         alg_eigsolve = Defaults.eigsolver, which,
         timeroutput::TimerOutput = DISABLED_TIMER,
         backend::AbstractBackend = DefaultBackend(), allocator = DefaultAllocator(),
+        parallel::Bool = true, scheduler = Defaults.scheduler[],
     )
     local AC, C
-    @timeit timeroutput "AC_eigsolve" begin
-        Hac = AC_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
-        _, AC = fixedpoint(Hac, AC₀, which, alg_eigsolve)
+    function AC_step(timeroutput)
+        @timeit timeroutput "AC_eigsolve" begin
+            Hac = AC_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
+            _, AC = fixedpoint(Hac, AC₀, which, alg_eigsolve)
+        end
+        return nothing
     end
-    @timeit timeroutput "C_eigsolve" begin
-        Hc = C_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
-        _, C = fixedpoint(Hc, C₀, which, alg_eigsolve)
+    function C_step(timeroutput)
+        @timeit timeroutput "C_eigsolve" begin
+            Hc = C_hamiltonian(site, mps, operator, mps, envs; backend, allocator)
+            _, C = fixedpoint(Hc, C₀, which, alg_eigsolve)
+        end
+        return nothing
+    end
+
+    if parallel
+        # TimerOutputs are not thread-safe: give each task its own and merge afterwards
+        sub_timeroutputs = [TimerOutput(), TimerOutput()]
+        tforeach(1:2; scheduler) do i
+            i == 1 ? AC_step(sub_timeroutputs[1]) : C_step(sub_timeroutputs[2])
+        end
+        timeroutput.enabled && foreach(sub -> merge!(timeroutput, sub), sub_timeroutputs)
+    else
+        AC_step(timeroutput)
+        C_step(timeroutput)
     end
     return regauge!(AC, C; alg = alg_orth)
 end
